@@ -100,8 +100,11 @@ state is a bitset of already-seen members. `whatCanGoHere` = every member not ye
 at every gap, since order is free); required-and-missing = required members minus seen. Simpler and
 faster than the automaton path, and it mirrors Xerces's `XSAllCM`.
 
-XSD 1.1 relaxes all of this, so generalise the bitset to a counter vector behind a version flag if
-1.1 ever comes into scope.
+**XSD 1.1 is in scope**, and it relaxes all of this — members may have unbounded `maxOccurs`,
+wildcards are allowed inside `xs:all`, and the `xs:all` particle itself may have `minOccurs` 0 or 1.
+So generalise the bitset to a **counter vector behind a version flag**. Build the 1.0 bitset first and
+the counter generalisation in Phase 4b; they share the same interface, so the query API does not
+change.
 
 ### 2.5 Substitution groups — symbol matchers, never expansion
 
@@ -417,6 +420,7 @@ Honest breakdown. **These are estimates, not measurements** (see PLAN.md §2).
 | P7 | Substitution/derivation indices (block/final/abstract) | 250 | |
 | P8 | Validator incl. identity constraints | 1,200 | identity constraints alone ~400 |
 | P9 | **Query API** (`whatCanGoHere`, `requiredMissing`, `widgetFor`, `describe`, `skeleton`, `repair`) | 600 | the differentiator |
+| P10 | **XSD 1.1**: `xs:assert` and `xs:alternative` via fontoxpath, `openContent`, `xs:override`, relaxed `xs:all` and UPA, version dispatch | 900–1,400 | Phase 4b. Cheaper than it looks because fontoxpath is already present — assertions need an evaluation context, not an engine |
 
 **A pragmatic v1 dropping identity constraints, restriction-legality checking and the rarer facets
 lands near 3,500 LOC.** Sequence **P6 and P9 early** — they are the product. Defer P8's identity

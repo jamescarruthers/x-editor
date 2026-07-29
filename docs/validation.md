@@ -56,27 +56,43 @@ change.
 > that shows one error at a time is much worse. Test with a document containing 5 distinct errors
 > before committing. `xmllint-wasm`'s CLI-shaped output does list all errors, which is the fallback.
 
-### 2.2 XSD 1.0 only — and why that is acceptable
+### 2.2 XSD 1.1 is in scope, and libxml2 cannot reach it
 
-libxml2 implements **XML Schema 1.0**. There is no 1.1, and the maintainer has stated it is not
-planned. Missing: `xs:assert`, `xs:alternative` (conditional type assignment), `openContent`,
-`xs:override`.
+libxml2 implements **XML Schema 1.0** only; the maintainer has stated 1.1 is not planned. Missing:
+`xs:assert`, `xs:alternative` (conditional type assignment), `openContent`, `xs:override`.
 
-The mitigation is the historically correct one: **the standard answer to "I need assertions in XSD
-1.0" has always been Schematron**, which this product also ships, edits, and can now teach. A document
-needing co-occurrence constraints gets them from a `.sch` file rather than from `xs:assert`.
+Since 1.1 is a confirmed requirement, libxml2 is therefore **demoted from authoritative validator to
+fast differential oracle for the 1.0 subset**. There is no JavaScript alternative — no XSD 1.1
+validator exists in JS at all, in the browser or in Node. Saxon-EE implements 1.1 properly and is a
+commercial per-seat Java product with no browser story.
 
-Two things must follow from this in the product:
+That leaves the three-layer arrangement in [`../PLAN.md` §5.1](../PLAN.md#51-xsd--our-engine-targets-11-two-oracles-check-it):
 
-1. A 1.1 schema gets an explicit **"this schema uses XSD 1.1 features (`xs:assert` on line 42)"**
-   message, not a generic compile failure.
-2. Note the sharp edge: **a 1.1-legal schema can be UPA-invalid under 1.0**, because 1.1 relaxed
-   Unique Particle Attribution. So some 1.1 schemas fail to compile entirely rather than degrading
-   gracefully. Detect and explain.
+1. **Our engine is the primary verdict** for both 1.0 and 1.1. This is less alarming than it sounds,
+   because we were always writing it — the guidance requirement forced that regardless — and the two
+   headline 1.1 features are XPath-shaped. `xs:assert` *is* an XPath 2.0 expression; `xs:alternative`
+   is an XPath predicate selecting a type. **fontoxpath is already a mandatory dependency**, so
+   assertions cost us an evaluation context, not an engine.
+2. **`libxml2-wasm`** stays as the fast oracle for 1.0 schemas, which is still most of the real world.
+3. **`xmlschema` (MIT, v4.3.2)** is the authoritative 1.1 oracle. It is pure Python — its only
+   dependency, `elementpath`, is also pure Python — so micropip installs it under Pyodide with nothing
+   to cross-compile. In the browser it loads lazily in its own worker behind an explicit "full
+   conformance check" action, never on the critical path, because Pyodide is ~6–10MB. In CI it runs
+   under plain CPython and costs nothing.
 
-If XSD 1.1 turns out to be a hard requirement (PLAN.md §13 Q1), the only browser-viable route is the
-Python `xmlschema` library under Pyodide — a ~6–10MB lazily-loaded escape hatch in its own worker,
-never on the critical path.
+Two sharp edges to handle explicitly:
+
+- **A 1.1-legal schema can be UPA-invalid under 1.0**, because 1.1 relaxed Unique Particle
+  Attribution. So libxml2 rejecting a 1.1 schema is expected behaviour, not a finding. The
+  differential harness must dispatch on the schema's declared version and pick its oracle
+  accordingly, or 1.1 schemas produce a flood of false failures.
+- **Version detection** comes from `vc:minVersion`/`vc:maxVersion` attributes and from the presence of
+  1.1-only constructs. When a schema is ambiguous, prefer 1.1 (it is the superset) and say which
+  version was assumed.
+
+Schematron does not become redundant. Co-occurrence rules are frequently *more* readable as Schematron
+asserts with human-authored messages than as `xs:assert`, and those messages are what give the
+Problems panel its plain English — an `xs:assert` failure can only ever say "an assertion failed".
 
 ### 2.3 Multi-file schemas — resolve the graph ourselves
 
@@ -234,7 +250,8 @@ means the product **teaches beginners wrong things**, which is worse than being 
 | Target | Oracle | Corpus |
 |---|---|---|
 | Guidance engine's `whatCanGoHere` | a naive backtracking reference matcher | property-generated random particle trees (fast-check) |
-| Our XSD verdicts | `libxml2-wasm` | W3C XML Schema Test Collection (~30k cases) + UBL 2.1, GML 3.2, HL7 CDA, DocBook, SEPA pain.001 |
+| Our XSD 1.0 verdicts | `libxml2-wasm` | W3C XML Schema Test Collection 1.0 (~30k cases) + UBL 2.1, GML 3.2, HL7 CDA, DocBook, SEPA pain.001 |
+| Our XSD 1.1 verdicts | `xmlschema` under CPython | W3C XML Schema 1.1 test set + schemas using `xs:assert`, `xs:alternative`, `openContent` |
 | Our Schematron findings | **SchXslt2 (MIT) + `xslt3` under Node** | SchXslt's own test suite + the ISO reference cases |
 
 SchXslt2 is CI-only and never shipped to the browser. It targets **ISO/IEC 19757-3:2025 (Edition 4,

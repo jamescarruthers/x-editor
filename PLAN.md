@@ -44,7 +44,6 @@ So the design commits to three things:
 - **Phones.** Tablet is degraded-but-usable; phone is out of scope.
 - **Real-time collaboration.** Single-user. The edit layer is command-shaped so a CRDT backend could
   be added later, but nothing else accommodates it.
-- **XSD 1.1 authoring and validation** in v1 — see §5.1 for why, and the mitigation.
 - **Being a text editor.** There is a source view with two-way sync, but the tree is the primary
   interaction. We are not competing with Oxygen's text mode.
 - **Server-side anything.** The app is a static SPA. Documents never leave the browser (§8).
@@ -65,6 +64,8 @@ decision.
 | `libxml2-wasm` exists, MIT, exposes `XsdValidator.fromDoc()` / `validate()` | **Verified** — v0.7.1 | [npm](https://registry.npmjs.org/libxml2-wasm/latest), [API docs](https://jameslan.github.io/libxml2-wasm/dev/classes/libxml2-wasm.XsdValidator.html) |
 | `libxml2-wasm` XSD `include`/`import` support | **Verified as EXPERIMENTAL** — a real risk, see SPIKE-2 | [README](https://github.com/jameslan/libxml2-wasm) |
 | libxml2 is XSD **1.0 only**, no `xs:assert`; 1.1 not planned | **Verified** | [libxml2 maintainer, xml list](https://mail.gnome.org/archives/xml/2011-November/msg00047.html) |
+| No JavaScript XSD 1.1 validator exists, browser or Node | **Verified** — every candidate is 1.0, or shells out to Java | search of npm + the XSD 1.1 tooling landscape |
+| `xmlschema` — MIT, **pure Python**, XSD 1.1 via `XMLSchema11`, only depends on `elementpath` (also pure Python) → installs under Pyodide | **Verified** — v4.3.2 | [PyPI](https://pypi.org/pypi/xmlschema/json) |
 | `fontoxpath` — XPath 3.1 in pure JS, MIT | **Verified** — v3.34.0 | [npm](https://registry.npmjs.org/fontoxpath/latest) |
 | `fontoxpath` supports a custom node model via `IDomFacade` | **Verified** | [GitHub](https://github.com/FontoXML/fontoxpath) |
 | `node-schematron` — pure-JS Schematron for browsers, MIT, built on fontoxpath + slimdom | **Verified** — v2.1.0 | [npm](https://registry.npmjs.org/node-schematron/latest) |
@@ -208,22 +209,47 @@ cleared, so the UI never flickers to "no problems" mid-edit.
 
 Full detail in [`docs/validation.md`](docs/validation.md).
 
-### 5.1 XSD — libxml2 via WASM
+### 5.1 XSD — our engine targets 1.1; two oracles check it
 
-`libxml2-wasm` (MIT, v0.7.1) as primary, `xmllint-wasm` as a named fallback behind an `XsdEngine`
-interface — same underlying engine, so switching is a driver swap, not a rewrite.
+**XSD 1.1 is in scope** (confirmed decision). That changes the validator layer, because **no
+JavaScript XSD 1.1 validator exists, in the browser or out of it** — libxml2 is 1.0-only and its
+maintainer has said 1.1 is not planned; Saxon-EE does 1.1 properly but is a commercial per-seat Java
+product with no browser story.
 
-Two consequences must be stated in the product, not buried:
+The saving grace is that **we were always writing the schema engine ourselves** (§4, and
+[`docs/schema-engine.md`](docs/schema-engine.md)), so 1.1 is an *extension* of that work rather than a
+different architecture. Better, the two headline 1.1 features are XPath-shaped: `xs:assert` is
+literally an XPath 2.0 expression and `xs:alternative` (conditional type assignment) is an XPath
+predicate. **fontoxpath is already a mandatory dependency** for Schematron and the XPath editor, so the
+marginal cost of 1.1 assertions is small. The remaining 1.1 work is `openContent`, `xs:override`, the
+relaxed `xs:all` (unbounded members, wildcards inside), and relaxed UPA.
 
-- **XSD 1.0 only.** libxml2 has no 1.1 and its maintainer has said it is not planned: no `xs:assert`,
-  `xs:alternative`, `openContent` or `xs:override`. The mitigation is pleasing, because it is the
-  historical one: *the recommended answer to "I need assertions in XSD 1.0" has always been
-  Schematron* — which this product also ships. A 1.1 schema that fails to compile gets an explicit
-  "this schema uses XSD 1.1 features" message, not a generic parse error.
-- **`xs:import`/`xs:include` support in `libxml2-wasm` is flagged experimental.** We therefore resolve
-  the schema graph ourselves in JavaScript before calling into WASM — walk it, resolve every
-  `schemaLocation` through an in-app catalogue, rewrite to flat deterministic filenames, and
-  materialise the closure into the WASM virtual FS. libxml2 never attempts a fetch. This is SPIKE-2.
+So the layering is:
+
+| Role | Engine | Scope |
+|---|---|---|
+| **Guidance + primary verdict** | our engine (`packages/xsd`) | XSD 1.0 **and** 1.1 |
+| Fast differential oracle | `libxml2-wasm` (MIT, v0.7.1) | the 1.0 subset — still most real schemas |
+| Authoritative 1.1 oracle | `xmlschema` (MIT, v4.3.2) under Pyodide | full 1.1, CI always + an in-app "full conformance check" |
+
+`xmlschema` is **pure Python** — its only dependency is `elementpath`, also pure Python — so micropip
+installs it under Pyodide with no C extensions to cross-compile. It is heavy (Pyodide is ~6–10MB), so
+it loads lazily in its own worker, never on the critical path, behind an explicit user action. In CI it
+runs under plain CPython, where it costs nothing.
+
+Two further consequences:
+
+- **A 1.1-legal schema can be UPA-invalid under 1.0.** So when the 1.0 oracle disagrees with our
+  engine on a 1.1 schema, that is expected, not a bug — the differential harness must know which
+  version a schema declares and pick its oracle accordingly, or it will drown in false failures.
+- **`xs:import`/`xs:include` support in `libxml2-wasm` is flagged experimental.** We resolve the schema
+  graph ourselves in JavaScript before calling into WASM — walk it, resolve every `schemaLocation`
+  through an in-app catalogue, rewrite to flat deterministic filenames, and materialise the closure
+  into the WASM virtual FS. libxml2 never attempts a fetch. This is SPIKE-2.
+
+Schematron remains valuable rather than redundant: co-occurrence rules are often *more* readable as
+Schematron asserts with human-authored messages than as `xs:assert`, and Schematron messages are what
+give the Problems panel its plain English.
 
 **Error→node mapping.** Rather than guessing from line/column, *own the serializer*: emit exactly one
 element start-tag per line when serialising for validation, and return a `lineMap: NodeId[]`
@@ -416,8 +442,8 @@ because there is no server to send anything to.
 | Layer | Approach |
 |---|---|
 | Well-formedness | W3C XML Conformance Test Suite against the saxes-based parser, with a documented known-fail list |
-| XSD conformance | W3C XML Schema Test Collection (~30k cases). **Publish the pass rate internally** so claims stay honest |
-| Guidance vs. verdict | Differential testing against libxml2-wasm over UBL 2.1, GML 3.2, HL7 CDA, DocBook, SEPA pain.001 |
+| XSD conformance | W3C XML Schema Test Collection (~30k cases), **both the 1.0 and 1.1 test sets**. **Publish the pass rate internally** so claims stay honest |
+| Guidance vs. verdict | Differential testing over UBL 2.1, GML 3.2, HL7 CDA, DocBook, SEPA pain.001 — against `libxml2-wasm` for 1.0 schemas and `xmlschema` (CPython, no Pyodide needed in CI) for 1.1. **The harness must dispatch on the schema's declared version**, or 1.1 schemas produce a flood of false failures from the 1.0 oracle |
 | Content-model automaton | **Property-based (fast-check): generate random particle trees, compare `whatCanGoHere` against a naive backtracking reference matcher.** This is the single highest-value test in the project — it catches the Glushkov follow-set and counter-clamping bugs that would otherwise reach users as "the editor says I can't add this but the validator says it's fine" |
 | Schematron | Differential against SchXslt2 + `xslt3` under Node |
 | Round-trip | Golden-file byte-identity tests over a corpus with CRLF, BOMs, entity refs, CDATA, internal subsets |
@@ -459,6 +485,14 @@ libxml2-wasm in a worker, the `lineMap` error→node mapping, the `cvc-*` messag
 **Done when:** every one of the 20 error classes in [`docs/schema-engine.md`](docs/schema-engine.md)
 renders in plain English with at least one working one-click fix.
 
+### Phase 4b — XSD 1.1 (medium)
+`xs:assert` and `xs:alternative` evaluated through fontoxpath (already present), `openContent`,
+`xs:override`, relaxed `xs:all`, relaxed UPA. Version dispatch on the schema's `vc:minVersion` /
+declared version. `xmlschema`-under-Pyodide wired in as the lazily-loaded conformance check, and as
+the CI oracle for 1.1.
+**Done when:** the W3C XSD 1.1 test set passes at a published rate, and a schema using `xs:assert`
+gives guidance and a verdict that agree with `xmlschema`.
+
 ### Phase 5 — Schematron (medium)
 The fontoxpath interpreter (from `node-schematron`), the Schematron editor mode, the live test
 harness, SchXslt2 differential CI.
@@ -483,11 +517,13 @@ Mixed-content editor, XSD diagram, table view for repeated siblings, PWA/offline
 1. **Guidance/verdict drift** (§5.3). The tool confidently teaches a beginner something the validator
    then rejects. *Mitigation:* differential CI from Phase 3 day one; property-based automaton tests;
    published pass rate. Never ship a palette suggestion the oracle disagrees with.
-2. **The XSD engine is underestimated.** 7,000–11,000 LOC is an unverified estimate and the simple-type
-   compiler is the sleeper (44 built-in types, 12 facets, plus the regex translator). *Mitigation:* the
-   phased split in [`docs/schema-engine.md`](docs/schema-engine.md) has a usable ~3,500-LOC v1 that
-   drops identity constraints and restriction-legality checking; sequence the automaton and query API
-   *early* because they are the differentiator.
+2. **The XSD engine is underestimated** — and XSD 1.1 being in scope makes this worse, since we now own
+   the *only* 1.1 implementation in the stack rather than checking ourselves against a mature one.
+   7,000–11,000 LOC was an unverified estimate for 1.0 alone, and the simple-type compiler is the
+   sleeper (44 built-in types, 12 facets, plus the regex translator). *Mitigation:* the phased split in
+   [`docs/schema-engine.md`](docs/schema-engine.md) has a usable ~3,500-LOC v1; sequence the automaton
+   and query API *early* because they are the differentiator; treat 1.1 features as a distinct later
+   phase so 1.0 documents are never blocked on them, and lean on `xmlschema` hard in CI.
 3. **Mixed content.** A row per node turns `<p>See <emph>this</emph> for details.</p>` into five rows —
    unusable. This is the entire DocBook/DITA/TEI/JATS world, exactly the audience a beginner-friendly
    XML editor attracts. *Mitigation:* decide in Phase 0, implement in Phase 8. Recommended: an inline
@@ -521,18 +557,22 @@ Mixed-content editor, XSD diagram, table view for repeated siblings, PWA/offline
 
 ---
 
-## 13. Decisions I need from you
+## 13. Decisions
 
-These change the shape of the work and I did not want to assume:
+**Answered:**
 
-1. **Is XSD 1.1 in or out?** Out is the plan's assumption (libxml2 cannot do it; Schematron covers the
-   assertion use case). If any target user needs it, the only browser-viable route is the Python
-   `xmlschema` library under Pyodide — a ~6–10MB lazily-loaded escape hatch, which is a real cost.
-2. **Do you need to open DTD- or RELAX NG-based documents?** They are common in the documentation-schema
-   world. Currently out of scope; opening one should at minimum give a clear "not supported" rather
-   than a confusing parse error.
-3. **How large are the documents you actually care about?** The design targets 50k nodes comfortably.
+1. ~~Is XSD 1.1 in or out?~~ **In.** Folded into §5.1 — our engine targets 1.1, with `xmlschema` under
+   Pyodide as the authoritative oracle. Adds roughly one phase of work to `packages/xsd` and makes
+   fontoxpath load-bearing for XSD as well as Schematron.
+2. ~~Is this destined to be commercial?~~ **No.** Every shipped dependency is MIT/ISC/Apache regardless,
+   so nothing changes structurally; it does mean the proprietary SaxonJS fallback stays off the table
+   permanently rather than merely being unattractive, which is fine — Chrome's XSLT removal had already
+   settled that.
+
+**Still open:**
+
+3. **Do you need to open DTD- or RELAX NG-based documents?** Common in the documentation-schema world.
+   Currently out of scope; opening one should at minimum give a clear "not supported" rather than a
+   confusing parse error.
+4. **How large are the documents you actually care about?** The design targets 50k nodes comfortably.
    50MB+ files change the architecture (streaming, partial loading) rather than just the tuning.
-4. **Is this destined to be a commercial product?** It affects nothing in the current plan — every
-   shipped dependency is MIT/ISC/Apache — but it makes the SaxonJS fallback permanently off the table
-   rather than merely unattractive.
