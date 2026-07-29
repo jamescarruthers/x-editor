@@ -30,8 +30,11 @@ jobs:
       # The XSD 1.1 differential oracle. libxml2 is 1.0-only and will not compile a schema using
       # xs:assert, so without this our engine would be the only 1.1 implementation in the stack and
       # nothing would check it. Pure Python, so there is nothing to build.
-      - name: Install the XSD 1.1 oracle
-        run: python3 -m pip install --quiet --break-system-packages xmlschema==4.3.2
+      # Two differential oracles, both pure-Python installs. Without them our engine would be the
+      # only implementation of XSD 1.1 and of Schematron in the stack, with nothing checking it —
+      # PLAN.md §11 risk 2 exactly.
+      - name: Install the differential oracles
+        run: python3 -m pip install --quiet --break-system-packages xmlschema==4.3.2 lxml
 
       - name: Typecheck
         run: pnpm -r typecheck
