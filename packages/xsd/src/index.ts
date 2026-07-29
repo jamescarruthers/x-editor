@@ -173,6 +173,7 @@ export {
   skeletonFor,
   serializeSkeleton,
   placeholderFor,
+  insertionPlan,
 } from './query.js';
 export type {
   AttributeStatus,
@@ -180,6 +181,7 @@ export type {
   ChildElement,
   ElementContext,
   InsertCandidate,
+  PlannedInsert,
   SkeletonNode,
   SkeletonOptions,
 } from './query.js';

@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { insertElement, removeNode, ROOT_ID } from '@x-editor/xml-core';
 import { store, useEditor } from './state/store.js';
 import { Tree } from './components/Tree.js';
 import { Inspector } from './components/Inspector.js';
 import { HistoryPanel, ProblemsPanel, SourcePanel } from './components/Panels.js';
+import { InsertPaletteHost } from './components/InsertPalette.js';
+import { declaredSchemaLocation } from './state/schema.js';
+import { documentProblems } from './model/problems.js';
+import { EXAMPLE_SCHEMA, EXAMPLE_SCHEMA_NAME } from './examples/purchaseOrder.js';
 
 type RightTab = 'source' | 'history';
 
@@ -11,15 +15,34 @@ export function App(): React.JSX.Element {
   useEditor();
   const [rightTab, setRightTab] = useState<RightTab>('source');
   const [problemsOpen, setProblemsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [announcement, setAnnounce] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
+  const schemaInput = useRef<HTMLInputElement>(null);
 
   const announce = useCallback((message: string) => setAnnounce(message), []);
 
-  // Global keys. Deliberately few for now — the full map in the UX spec arrives with the insert
-  // palette, and binding half of it early would teach users shortcuts that then move.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
+      const typing =
+        event.target instanceof HTMLElement &&
+        (event.target.tagName === 'INPUT' ||
+          event.target.tagName === 'TEXTAREA' ||
+          event.target.isContentEditable);
+
+      // Insertion is rendered several ways at once so it cannot be missed: a toolbar button, the
+      // Inspector's "Allowed here" section, and these bindings.
+      if (!typing && store.schema.model !== null) {
+        if (
+          (event.ctrlKey && event.key === ' ') ||
+          (!event.ctrlKey && !event.metaKey && (event.key === '/' || event.key === '+' || event.key === 'Insert'))
+        ) {
+          event.preventDefault();
+          setPaletteOpen(true);
+          return;
+        }
+      }
+
       const mod = event.ctrlKey || event.metaKey;
       if (!mod) return;
 
@@ -41,7 +64,24 @@ export function App(): React.JSX.Element {
   }, [announce]);
 
   const doc = store.document;
-  const problemCount = store.problems.length;
+  const schemaName = store.schema.name;
+  const model = store.schema.model;
+
+  // The badge counts what the guidance engine can see as well as well-formedness. It is explicitly
+  // not the authoritative verdict — libxml2 arrives in Phase 4 — so the label says "matches the
+  // schema", not "valid".
+  const schemaIssues = useMemo(
+    () => (model === null ? 0 : documentProblems(model, doc).filter((p) => p.severity === 'error').length),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.getSnapshot(), model],
+  );
+  const problemCount = store.problems.length + schemaIssues;
+  const suggestedSchema = schemaName === null ? declaredSchemaLocation(doc) : null;
+
+  const useExampleSchema = (): void => {
+    store.attachSchema(EXAMPLE_SCHEMA_NAME, EXAMPLE_SCHEMA);
+    announce('Attached the example schema.');
+  };
 
   const addChild = (): void => {
     const target = store.selected;
@@ -100,11 +140,33 @@ export function App(): React.JSX.Element {
             color: problemCount === 0 ? 'var(--ok)' : 'var(--error)',
           }}
         >
-          {problemCount === 0 ? 'Well-formed' : `${problemCount} problem${problemCount === 1 ? '' : 's'}`}
+          {problemCount > 0
+            ? `${problemCount} problem${problemCount === 1 ? '' : 's'}`
+            : model === null
+              ? 'Well-formed'
+              : 'Matches the schema'}
         </span>
 
         <div className="flex-1" />
 
+        {schemaName === null ? (
+          <ToolbarButton onClick={() => schemaInput.current?.click()}>Attach schema</ToolbarButton>
+        ) : (
+          <ToolbarButton onClick={() => store.detachSchema()} title={`Attached: ${schemaName}`}>
+            Schema: {schemaName}
+          </ToolbarButton>
+        )}
+        <ToolbarButton
+          onClick={() => setPaletteOpen(true)}
+          disabled={store.schema.model === null}
+          title={
+            store.schema.model === null
+              ? 'Attach a schema to see what may be inserted'
+              : 'Insert an element (Ctrl+Space)'
+          }
+        >
+          + Insert
+        </ToolbarButton>
         <ToolbarButton onClick={addChild}>+ Add element</ToolbarButton>
         <ToolbarButton onClick={deleteSelected}>Delete</ToolbarButton>
         <ToolbarButton onClick={() => store.undo()} disabled={!doc.canUndo}>
@@ -115,6 +177,27 @@ export function App(): React.JSX.Element {
         </ToolbarButton>
         <ToolbarButton onClick={() => fileInput.current?.click()}>Open</ToolbarButton>
         <ToolbarButton onClick={save}>Save</ToolbarButton>
+        <input
+          ref={schemaInput}
+          type="file"
+          accept=".xsd,text/xml,application/xml"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file !== undefined) {
+              void file.text().then((text) => {
+                store.attachSchema(file.name, text);
+                const errors = store.schemaProblems.filter((p) => p.severity === 'error').length;
+                announce(
+                  errors === 0
+                    ? `Attached ${file.name}.`
+                    : `Attached ${file.name} with ${errors} problem${errors === 1 ? '' : 's'}.`,
+                );
+              });
+            }
+            e.target.value = '';
+          }}
+        />
         <input
           ref={fileInput}
           type="file"
@@ -152,6 +235,47 @@ export function App(): React.JSX.Element {
         </aside>
 
         <main className="flex min-w-0 flex-1 flex-col">
+          {schemaName === null && (
+            <div
+              className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]"
+              style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-2)' }}
+            >
+              <span style={{ color: 'var(--text-secondary)' }}>
+                No schema attached, so anything is allowed here.
+              </span>
+              <button
+                type="button"
+                onClick={useExampleSchema}
+                className="ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[11px]"
+                style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
+              >
+                Try the example schema
+              </button>
+            </div>
+          )}
+          {suggestedSchema !== null && (
+            // The document names a schema. The URL is shown, never followed: auto-fetching a remote
+            // schemaLocation would hand a hostile document the user's network position.
+            <div
+              className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]"
+              style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-2)' }}
+            >
+              <span style={{ color: 'var(--text-secondary)' }}>
+                This document names a schema:
+              </span>
+              <span className="truncate font-mono" style={{ color: 'var(--text-tertiary)' }}>
+                {suggestedSchema}
+              </span>
+              <button
+                type="button"
+                onClick={() => schemaInput.current?.click()}
+                className="ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[11px]"
+                style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
+              >
+                Attach it from a file
+              </button>
+            </div>
+          )}
           <div className="min-h-0 flex-1">
             <Tree />
           </div>
@@ -163,7 +287,7 @@ export function App(): React.JSX.Element {
           className="w-[360px] shrink-0 border-l"
           style={{ borderColor: 'var(--border-default)', background: 'var(--surface-1)' }}
         >
-          <Inspector />
+          <Inspector onOpenPalette={() => setPaletteOpen(true)} />
         </aside>
       </div>
 
@@ -207,6 +331,12 @@ export function App(): React.JSX.Element {
           </div>
         )}
       </footer>
+
+      <InsertPaletteHost
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onAnnounce={announce}
+      />
 
       {/*
         One polite live region, written through one place, so ordering and debouncing stay in one
@@ -258,16 +388,19 @@ function ToolbarButton({
   children,
   onClick,
   disabled,
+  title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  title?: string;
 }): React.JSX.Element {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className="rounded border px-2 py-1 text-[12px] disabled:opacity-40"
       style={{
         borderColor: 'var(--border-default)',

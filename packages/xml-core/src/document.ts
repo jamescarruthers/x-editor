@@ -5,6 +5,7 @@ import {
   isParentNode,
   qnameToString,
   type Attribute,
+  type NamespaceDeclaration,
   type NodeId,
   type ParentNode,
   type ParseError,
@@ -231,6 +232,12 @@ export class XmlDocument {
 export interface NewElementSpec {
   readonly name: QName;
   readonly attributes?: readonly { name: QName; value: string }[];
+  /**
+   * Declarations to write on the new element. Needed when inserting into a namespace no prefix in
+   * scope binds — the alternative is inventing a prefix on an ancestor, which rewrites a part of
+   * the document the user did not touch.
+   */
+  readonly namespaceDeclarations?: readonly NamespaceDeclaration[];
 }
 
 /**
@@ -251,7 +258,7 @@ export function insertElement(
     attributes: (spec.attributes ?? []).map(
       (a): Attribute => ({ name: a.name, value: a.value, raw: null, quote: '"' }),
     ),
-    namespaceDeclarations: [],
+    namespaceDeclarations: [...(spec.namespaceDeclarations ?? [])],
     children: [],
     openTagSpan: null,
     closeTagSpan: null,

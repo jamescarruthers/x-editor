@@ -29,6 +29,9 @@ importers:
       '@x-editor/xml-core':
         specifier: workspace:*
         version: link:../../packages/xml-core
+      '@x-editor/xsd':
+        specifier: workspace:*
+        version: link:../../packages/xsd
       react:
         specifier: ^19.1.0
         version: 19.2.8

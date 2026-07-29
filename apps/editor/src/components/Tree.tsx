@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { qnameToString, type NodeId } from '@x-editor/xml-core';
 import { store, useEditor } from '../state/store.js';
+import { missingRequiredAttributes, requiredMissing } from '@x-editor/xsd';
 import { buildRows, nodeLabel, textPreview, type Row } from '../model/rows.js';
 
 const ROW_HEIGHT = 28;
@@ -247,6 +248,8 @@ function TreeRow({
             {node.name.localName}
           </span>
 
+          <SchemaBadge row={row} />
+
           {row.siblingCount > 1 && (
             <span
               className="tnum shrink-0 rounded px-1 text-[11px]"
@@ -312,6 +315,47 @@ function inlineText(node: Row['node']): string {
 }
 
 /** Lucide has no XML-semantic glyphs, so these are the custom set the spec budgets for. */
+/**
+ * The validity badge on a tree row.
+ *
+ * Computed per visible row rather than for the whole document, which is what makes it affordable at
+ * the 50k-node target: the virtualizer renders about thirty rows, so about thirty content-model
+ * queries happen per frame instead of fifty thousand.
+ *
+ * Colour is never the only signal — the badge carries a count and a title — because a red dot alone
+ * is invisible to a good fraction of users.
+ */
+function SchemaBadge({ row }: { row: Row }): React.JSX.Element {
+  if (store.schema.model === null || row.node.kind !== 'element') return <></>;
+
+  const context = store.contextFor(row.id);
+  if (context === null) return <></>;
+
+  const model = store.schema.model;
+  const missingChildren = requiredMissing(model, context).length;
+  const missingAttributes = missingRequiredAttributes(store.document, context).length;
+  const total = missingChildren + missingAttributes;
+  if (total === 0) return <></>;
+
+  const parts: string[] = [];
+  if (missingChildren > 0) {
+    parts.push(`${missingChildren} required ${missingChildren === 1 ? 'child' : 'children'}`);
+  }
+  if (missingAttributes > 0) {
+    parts.push(`${missingAttributes} required ${missingAttributes === 1 ? 'attribute' : 'attributes'}`);
+  }
+
+  return (
+    <span
+      className="tnum shrink-0 rounded px-1 text-[11px]"
+      style={{ background: 'var(--error-soft)', color: 'var(--error)' }}
+      title={`Missing ${parts.join(' and ')}`}
+    >
+      {total} missing
+    </span>
+  );
+}
+
 function NodeGlyph({ kind }: { kind: Row['node']['kind'] }): React.JSX.Element {
   const colour =
     kind === 'element'

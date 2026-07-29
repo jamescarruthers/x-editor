@@ -9,6 +9,12 @@ import {
 } from '@x-editor/xml-core';
 import { store, useEditor } from '../state/store.js';
 import { describe, humanise } from '../model/describe.js';
+import {
+  AllowedHere,
+  SchemaAttributes,
+  SchemaIdentity,
+  SchemaValue,
+} from './SchemaSections.js';
 
 /**
  * The right panel.
@@ -17,7 +23,11 @@ import { describe, humanise } from '../model/describe.js';
  * selected node in one fixed place, which is the property beginners rely on most. Sections are
  * ordered so the question "what even is this?" is answered above the controls that change it.
  */
-export function Inspector(): React.JSX.Element {
+export function Inspector({
+  onOpenPalette,
+}: {
+  onOpenPalette: () => void;
+}): React.JSX.Element {
   useEditor();
   const doc = store.document;
   const id = store.selected;
@@ -27,6 +37,8 @@ export function Inspector(): React.JSX.Element {
     return <Empty>Nothing selected.</Empty>;
   }
 
+  const model = store.schema.model;
+  const context = node.kind === 'element' ? store.contextFor(id) : null;
   const description = describe(doc, id);
 
   return (
@@ -47,23 +59,31 @@ export function Inspector(): React.JSX.Element {
         )}
       </header>
 
-      <Section title="What is this?">
-        <p style={{ color: 'var(--text-secondary)' }}>{description.text}</p>
-        {description.source !== 'schema' && (
-          // Users must always be able to tell a rule from a guess.
-          <span
-            className="mt-1.5 inline-block rounded px-1 text-[11px]"
-            style={{ background: 'var(--surface-2)', color: 'var(--text-tertiary)' }}
-            title="Worked out from your document, not from a schema"
-          >
-            auto
-          </span>
-        )}
-      </Section>
+      {model !== null && context !== null ? (
+        <SchemaIdentity context={context} model={model} />
+      ) : (
+        <Section title="What is this?">
+          <p style={{ color: 'var(--text-secondary)' }}>{description.text}</p>
+          {description.source !== 'schema' && (
+            // Users must always be able to tell a rule from a guess.
+            <span
+              className="mt-1.5 inline-block rounded px-1 text-[11px]"
+              style={{ background: 'var(--surface-2)', color: 'var(--text-tertiary)' }}
+              title="Worked out from your document, not from a schema"
+            >
+              auto
+            </span>
+          )}
+        </Section>
+      )}
 
-      {node.kind === 'element' && <Attributes id={id} />}
+      {/* The schema-driven attributes editor replaces the raw one entirely rather than sitting
+          beside it: two attribute lists on one panel is the sort of thing that reads as a bug. */}
+      {context !== null && <SchemaAttributes context={context} />}
+      {node.kind === 'element' && context === null && <Attributes id={id} />}
 
-      {node.kind === 'element' && <ValueEditor id={id} />}
+      {context !== null && <SchemaValue context={context} />}
+      {node.kind === 'element' && context === null && <ValueEditor id={id} />}
 
       {(node.kind === 'text' || node.kind === 'cdata' || node.kind === 'comment') && (
         <Section title="Content">
@@ -74,12 +94,16 @@ export function Inspector(): React.JSX.Element {
         </Section>
       )}
 
-      <Section title="Allowed here">
-        <p style={{ color: 'var(--text-tertiary)' }}>
-          No schema is attached, so anything is allowed. Attach an XSD to see what belongs here and
-          what is missing.
-        </p>
-      </Section>
+      {model !== null && context !== null ? (
+        <AllowedHere context={context} model={model} onOpenPalette={onOpenPalette} />
+      ) : (
+        <Section title="Allowed here">
+          <p style={{ color: 'var(--text-tertiary)' }}>
+            No schema is attached, so anything is allowed. Attach an XSD to see what belongs here and
+            what is missing.
+          </p>
+        </Section>
+      )}
     </div>
   );
 }

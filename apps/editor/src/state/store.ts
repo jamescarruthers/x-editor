@@ -6,6 +6,8 @@ import {
   type NodeId,
   type ParseError,
 } from '@x-editor/xml-core';
+import type { ElementContext, SchemaDiagnostic } from '@x-editor/xsd';
+import { SchemaStore } from './schema.js';
 
 /**
  * The document lives outside React.
@@ -24,6 +26,8 @@ class EditorStore {
   selected: NodeId = ROOT_ID;
   expanded = new Set<NodeId>();
   fileName = 'untitled.xml';
+  readonly schema = new SchemaStore();
+  schemaProblems: readonly SchemaDiagnostic[] = [];
 
   constructor(source: string, fileName: string) {
     this.doc = XmlDocument.parse(source);
@@ -138,6 +142,30 @@ class EditorStore {
 
   get problems(): readonly ParseError[] {
     return this.doc.parseErrors;
+  }
+
+  // --- schema ------------------------------------------------------------
+
+  attachSchema(fileName: string, source: string): void {
+    this.schemaProblems = this.schema.attach(fileName, source);
+    this.emit();
+  }
+
+  detachSchema(): void {
+    this.schema.detach();
+    this.schemaProblems = [];
+    this.emit();
+  }
+
+  /**
+   * The schema context for a node, recomputed rather than cached.
+   *
+   * Caching would need invalidating on every edit that changes an ancestor's shape, and the walk is
+   * proportional to depth rather than document size — cheap enough that a cache would cost more in
+   * staleness bugs than it saves.
+   */
+  contextFor(id: NodeId): ElementContext | null {
+    return this.schema.contextFor(this.doc, id);
   }
 }
 

@@ -263,6 +263,38 @@ export function insertCandidates(
   return candidates;
 }
 
+export interface PlannedInsert extends InsertCandidate {
+  /** The index among the parent's element children where this belongs. */
+  readonly index: number;
+}
+
+/**
+ * Every element that can be added anywhere in this parent, each paired with the position the
+ * content model actually expects it at.
+ *
+ * This is what lets the palette be a single list rather than a caret the user has to place first.
+ * A beginner with `<line>` already present and `<orderId>` missing should not have to work out that
+ * the missing one goes *before* what is already there — the model knows, so the palette places it.
+ *
+ * Costs one co-reachability sweep per gap. That is quadratic in the child count of one element,
+ * which is fine for a palette (tens of children) and is why it is not used to paint the tree.
+ */
+export function insertionPlan(model: SchemaModel, context: ElementContext): PlannedInsert[] {
+  const seen = new Map<string, PlannedInsert>();
+
+  for (let index = 0; index <= context.children.length; index++) {
+    for (const candidate of insertCandidates(model, context, index)) {
+      const key = elementNameKey(candidate.name);
+      if (seen.has(key)) continue;
+      seen.set(key, { ...candidate, index });
+    }
+  }
+
+  return [...seen.values()].sort(
+    (a, b) => GROUP_ORDER[a.group] - GROUP_ORDER[b.group] || a.index - b.index,
+  );
+}
+
 const GROUP_ORDER: Record<CandidateGroup, number> = {
   'required-missing': 0,
   suggested: 1,

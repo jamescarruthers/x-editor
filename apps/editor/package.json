@@ -13,6 +13,7 @@
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.0",
     "@x-editor/xml-core": "workspace:*",
+    "@x-editor/xsd": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

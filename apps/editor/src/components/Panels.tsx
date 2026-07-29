@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { store, useEditor } from '../state/store.js';
+import { documentProblems } from '../model/problems.js';
 
 /** The serialized document, live. Proof the splice serializer is preserving what it should. */
 export function SourcePanel(): React.JSX.Element {
@@ -48,17 +49,27 @@ export function HistoryPanel(): React.JSX.Element {
 }
 
 /**
- * Problems.
+ * Problems: well-formedness, schema compilation, and what the guidance engine can see.
  *
- * Only well-formedness for now — XSD and Schematron findings land in the same list once those
- * engines exist, which is why the row shape is already severity + message + jump-to-node rather
- * than something parser-specific.
+ * The three sources stay labelled rather than merged. libxml2 is the authoritative verdict and
+ * arrives in Phase 4; when it and the guidance engine eventually disagree, the differential harness
+ * has to be able to say which one was wrong, and one undifferentiated list would hide that.
  */
 export function ProblemsPanel(): React.JSX.Element {
   useEditor();
   const problems = store.problems;
+  const schemaProblems = store.schemaProblems;
 
-  if (problems.length === 0) {
+  const documentIssues = useMemo(
+    () =>
+      store.schema.model === null ? [] : documentProblems(store.schema.model, store.document),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.getSnapshot()],
+  );
+
+  const total = problems.length + schemaProblems.length + documentIssues.length;
+
+  if (total === 0) {
     return (
       <div className="flex items-center gap-2 px-3 py-2">
         <svg width="14" height="14" viewBox="0 0 14 14" style={{ color: 'var(--ok)' }} aria-hidden>
@@ -71,7 +82,9 @@ export function ProblemsPanel(): React.JSX.Element {
           />
         </svg>
         <span style={{ color: 'var(--text-secondary)' }}>
-          No problems. This document is well-formed.
+          {store.schema.model === null
+            ? 'No problems. This document is well-formed.'
+            : 'No problems. This document is well-formed and matches the schema.'}
         </span>
       </div>
     );
@@ -80,20 +93,70 @@ export function ProblemsPanel(): React.JSX.Element {
   return (
     <ul className="scroll-thin h-full overflow-auto py-1">
       {problems.map((problem, i) => (
-        <li key={i} className="flex items-start gap-2 px-3 py-1">
-          <span
-            className="mt-1 size-2 shrink-0 rounded-full"
-            style={{ background: 'var(--error)' }}
-            aria-hidden
-          />
-          <div className="min-w-0">
-            <div style={{ color: 'var(--text-primary)' }}>{problem.message}</div>
-            <div className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-              character {problem.offset} · {problem.code}
-            </div>
-          </div>
-        </li>
+        <ProblemRow
+          key={`wf-${i}`}
+          severity="error"
+          message={problem.message}
+          detail={`character ${problem.offset} · ${problem.code}`}
+        />
+      ))}
+
+      {schemaProblems.map((problem, i) => (
+        <ProblemRow
+          key={`schema-${i}`}
+          severity={problem.severity}
+          message={problem.message}
+          detail={`in the schema · ${problem.origin.documentUri} · ${problem.code}`}
+        />
+      ))}
+
+      {documentIssues.map((problem, i) => (
+        <ProblemRow
+          key={`doc-${i}`}
+          severity={problem.severity}
+          message={problem.message}
+          detail={`${problem.path} · ${problem.code}`}
+          onClick={() => store.select(problem.nodeId)}
+        />
       ))}
     </ul>
+  );
+}
+
+function ProblemRow({
+  severity,
+  message,
+  detail,
+  onClick,
+}: {
+  severity: 'error' | 'warning';
+  message: string;
+  detail: string;
+  onClick?: () => void;
+}): React.JSX.Element {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={onClick === undefined}
+        className="flex w-full items-start gap-2 px-3 py-1 text-left disabled:cursor-default"
+      >
+        {/* Shape as well as colour: a red dot on its own is invisible to a good fraction of users. */}
+        <span
+          className="mt-0.5 shrink-0 text-[11px]"
+          style={{ color: severity === 'error' ? 'var(--error)' : 'var(--text-tertiary)' }}
+          aria-hidden
+        >
+          {severity === 'error' ? '\u2715' : '!'}
+        </span>
+        <div className="min-w-0">
+          <div style={{ color: 'var(--text-primary)' }}>{message}</div>
+          <div className="truncate text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+            {detail}
+          </div>
+        </div>
+      </button>
+    </li>
   );
 }
