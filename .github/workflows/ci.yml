@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # A branch with an open PR would otherwise run twice per push, once for each trigger.
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 concurrency:
