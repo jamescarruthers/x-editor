@@ -4,7 +4,12 @@ A browser-based, tree-node editor for **XML**, **XSD** and **Schematron**, with 
 validation running client-side, designed so that someone who does not already know the schema can
 still produce a valid document.
 
-**Status:** plan, pre-implementation. The repository is empty apart from this document.
+**Status:** Phases 1–3 implemented. `packages/xml-core` (lossless CST, command log, splice
+serializer), `packages/xsd` (schema front end, simple- and complex-type compilers, Glushkov
+automaton, query API) and `apps/editor` (four-region shell, virtualized tree, Insert palette,
+schema-driven Inspector) are in place, at ~9,000 lines with 300 tests. Phase 4 — libxml2-wasm as the
+authoritative verdict, the `cvc-*` catalogue and quick fixes — is next. See §10 for the roadmap and
+the per-phase *done when*.
 
 **Companion documents**
 
@@ -467,23 +472,30 @@ phases are ordered and relatively sized.
 Resolve SPIKE-0…3 (§12) before the architecture is fixed.
 **Done when:** each spike has a written answer and the affected decisions are confirmed or changed.
 
-### Phase 1 — Lossless core (medium)
+### Phase 1 — Lossless core (medium) — **done**
 `packages/xml-core`: saxes-based CST, spans, command log with inverses, splice serializer. No UI
 beyond a debug view.
 **Done when:** the golden-file corpus round-trips byte-identically, and property tests confirm
 `apply`→`invert` is the identity over random edit sequences.
 
-### Phase 2 — Tree editor, no schema (medium)
-The four-region shell, virtualized tree, left Inspector with a raw attributes editor, source view,
+### Phase 2 — Tree editor, no schema (medium) — **done**
+The four-region shell, virtualized tree, right-hand Inspector with a raw attributes editor, source view,
 undo/redo with the History panel, open/save. Schema-less editing only.
 **Done when:** a 50k-node document opens, edits and saves with no reformatting, entirely by keyboard.
 
-### Phase 3 — The guidance engine (large — this is the product)
+### Phase 3 — The guidance engine (large — this is the product) — **done, bar the differential corpus**
 `packages/xsd`: parse → assemble → resolve → simple types → complex types → particle automaton →
 substitution indices → query API. Then the Insert palette, `describe.ts`, required-missing badges,
 skeleton generation.
 **Done when:** given an unfamiliar schema, a user who has never seen it can build a valid document
 using only the palette — and the palette's answers agree with libxml2 across the differential corpus.
+
+The first half holds: the palette places each element where the content model expects it, fills in
+required attributes and children, and "Add all required" turns an invalid element into a valid one
+in one undoable step. The second half waits on Phase 4, since the oracle it compares against is the
+libxml2 binding that phase introduces. Until then the automaton is checked against the naive
+backtracking reference matcher in `packages/xsd/test/reference.ts` under fast-check, which is what
+caught the co-accessibility bug.
 
 ### Phase 4 — Validation and quick fixes (medium)
 libxml2-wasm in a worker, the `lineMap` error→node mapping, the `cvc-*` message catalogue, the
