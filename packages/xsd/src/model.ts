@@ -125,6 +125,8 @@ export class SchemaModel {
   private readonly typeCache = new Map<string, CompiledType>();
   private readonly elementsByName = new Map<string, CompiledElement>();
   private readonly contentModels = new Map<CompiledComplexType, ContentModel>();
+  /** Local element declarations reachable in a type's content, by name. */
+  private readonly localElements = new Map<CompiledComplexType, Map<string, CompiledElement>>();
   private readonly compilingComplex = new Set<RawComplexType>();
 
   /** head key → every element that may appear in its place, transitively. */
@@ -289,13 +291,38 @@ export class SchemaModel {
       return ANY_TYPE_DEF;
     }
     this.compilingComplex.add(raw);
-    const compiled = this.compileComplexUncached(raw);
+    const locals: CompiledElement[] = [];
+    const compiled = this.compileComplexUncached(raw, locals);
     this.compilingComplex.delete(raw);
     this.complexByRaw.set(raw, compiled);
+    this.localElements.set(compiled, new Map(locals.map((local) => [qnameKey(local.name), local])));
     return compiled;
   }
 
-  private compileComplexUncached(raw: RawComplexType): CompiledComplexType {
+  /**
+   * The declaration governing a child of this type, local or global.
+   *
+   * The Inspector and the Insert palette both need the *declaration*, not just the name — that is
+   * where the documentation, the default value and the nillable flag live. Walking the base chain
+   * matters because an extension's content model contains the base's particles.
+   */
+  elementDeclarationIn(type: CompiledComplexType, name: ElementName): CompiledElement | null {
+    const key = qnameKey(name);
+    let cursor: CompiledComplexType | null = type;
+    const seen = new Set<CompiledComplexType>();
+
+    while (cursor !== null && !seen.has(cursor)) {
+      seen.add(cursor);
+      const local = this.localElements.get(cursor)?.get(key);
+      if (local !== undefined) return local;
+      if (cursor.baseName === null) break;
+      const base: CompiledType = this.typeByName(cursor.baseName, cursor.origin);
+      cursor = base.form === 'complex' ? base : null;
+    }
+    return this.globalElement(name);
+  }
+
+  private compileComplexUncached(raw: RawComplexType, locals: CompiledElement[]): CompiledComplexType {
     const document = this.symbols.documentOf(raw.origin.documentUri);
     const name =
       raw.name === null
@@ -315,7 +342,7 @@ export class SchemaModel {
 
     switch (raw.content.kind) {
       case 'particle': {
-        const particle = this.toParticle(raw.content.particle, raw.origin);
+        const particle = this.toParticle(raw.content.particle, raw.origin, new Set(), locals);
         return {
           ...(base as CompiledComplexType),
           contentKind: particle === null ? (raw.mixed ? 'mixed' : 'empty') : raw.mixed ? 'mixed' : 'element-only',
@@ -364,7 +391,7 @@ export class SchemaModel {
         const baseType =
           content.base === null ? ANY_TYPE_DEF : this.typeByName(content.base, content.origin);
         const baseComplex = baseType.form === 'complex' ? baseType : ANY_TYPE_DEF;
-        const own = this.toParticle(content.particle, content.origin);
+        const own = this.toParticle(content.particle, content.origin, new Set(), locals);
 
         // Extension concatenates: the base's content, then the extension's. Restriction replaces —
         // the spec requires the replacement to be a valid restriction, which is checked in Phase 6
@@ -538,7 +565,12 @@ export class SchemaModel {
    * baked in: by the time the automaton sees an element particle, it already knows every name that
    * may stand in for it.
    */
-  private toParticle(raw: RawParticle | null, origin: Origin, seenGroups = new Set<string>()): Particle | null {
+  private toParticle(
+    raw: RawParticle | null,
+    origin: Origin,
+    seenGroups = new Set<string>(),
+    locals: CompiledElement[] = [],
+  ): Particle | null {
     if (raw === null) return null;
 
     switch (raw.kind) {
@@ -561,9 +593,10 @@ export class SchemaModel {
 
         const document = this.symbols.documentOf(element.origin.documentUri);
         if (document === undefined) return null;
-        const name = declaredName(element, document);
-        if (name === null) return null;
-        return { kind: 'element', name, occurs: element.occurs, substitutions: [] };
+        const compiled = this.compileElement(element, document, false);
+        if (compiled === null) return null;
+        locals.push(compiled);
+        return { kind: 'element', name: compiled.name, occurs: element.occurs, substitutions: [] };
       }
 
       case 'group-ref': {
@@ -582,7 +615,12 @@ export class SchemaModel {
           this.symbols.reportUnresolved('group', raw.ref, raw.origin);
           return null;
         }
-        const inner = this.toParticle(group.particle, group.origin, new Set([...seenGroups, key]));
+        const inner = this.toParticle(
+          group.particle,
+          group.origin,
+          new Set([...seenGroups, key]),
+          locals,
+        );
         if (inner === null) return null;
         // The reference's own occurrence bounds wrap the group's content.
         return applyOccurs(inner, raw.occurs);
@@ -591,7 +629,7 @@ export class SchemaModel {
       case 'sequence':
       case 'choice': {
         const items = raw.items
-          .map((item) => this.toParticle(item, origin, seenGroups))
+          .map((item) => this.toParticle(item, origin, seenGroups, locals))
           .filter((item): item is Particle => item !== null);
         if (items.length === 0) return null;
         return { kind: raw.kind, items, occurs: raw.occurs };
@@ -600,7 +638,7 @@ export class SchemaModel {
       case 'all': {
         const items: { name: ElementName; occurs: Occurs }[] = [];
         for (const item of raw.items) {
-          const compiled = this.toParticle(item, origin, seenGroups);
+          const compiled = this.toParticle(item, origin, seenGroups, locals);
           if (compiled?.kind === 'element') items.push({ name: compiled.name, occurs: compiled.occurs });
         }
         return { kind: 'all', items, occurs: raw.occurs };

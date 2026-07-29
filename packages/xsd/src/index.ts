@@ -143,3 +143,43 @@ export type {
   ContentModel,
   Wildcard,
 } from './model.js';
+
+export {
+  humaniseName,
+  describeCardinality,
+  cardinalityChip,
+  describeFacets,
+  describeType,
+  describeElement,
+  describeAttribute,
+  describeWildcard,
+} from './describe.js';
+export type { Description } from './describe.js';
+
+export { widgetFor } from './widgets.js';
+export type { Widget } from './widgets.js';
+
+export {
+  elementContext,
+  childElements,
+  insertCandidates,
+  groupCandidates,
+  requiredMissing,
+  firstProblemIndex,
+  attributeStatuses,
+  missingRequiredAttributes,
+  textTypeOf,
+  validateText,
+  skeletonFor,
+  serializeSkeleton,
+  placeholderFor,
+} from './query.js';
+export type {
+  AttributeStatus,
+  CandidateGroup,
+  ChildElement,
+  ElementContext,
+  InsertCandidate,
+  SkeletonNode,
+  SkeletonOptions,
+} from './query.js';
