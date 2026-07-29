@@ -3,6 +3,7 @@ import { insertionPlan, requiredMissing } from '@x-editor/xsd';
 import type { NodeId } from '@x-editor/xml-core';
 import { store } from '../src/state/store.js';
 import { insertAllRequired, insertPlanned } from '../src/model/insert.js';
+import { applyFix } from '../src/model/fixes.js';
 import { documentProblems } from '../src/model/problems.js';
 import { EXAMPLE_SCHEMA, EXAMPLE_SCHEMA_NAME } from '../src/examples/purchaseOrder.js';
 
@@ -150,18 +151,22 @@ describe('add all required', () => {
   });
 });
 
-describe('problems the guidance engine can already see', () => {
-  it('reports a child in the wrong place', () => {
+describe('diagnostics and their fixes', () => {
+  const diagnose = () => documentProblems(store.schema.model!, store.document);
+  const messages = () => diagnose().map((d) => d.message);
+
+  it('describes a swapped pair as a swap, not as two unrelated errors', () => {
     load(`<purchaseOrder orderDate="2026-07-29">
   <items/>
   <shipTo country="GB"/>
 </purchaseOrder>
 `);
-    const messages = documentProblems(store.schema.model!, store.document).map((p) => p.message);
-    expect(messages.some((message) => message.includes('<items> cannot appear here'))).toBe(true);
+    // The alignment finds one transposition rather than a delete plus an insert, so the user is
+    // told the thing that is actually true.
+    expect(messages()).toContain('<items> and <shipTo> are the wrong way round.');
   });
 
-  it('reports a missing required attribute', () => {
+  it('reports a missing required attribute and can add it', () => {
     load(`<purchaseOrder>
   <shipTo country="GB">
     <name>A</name><street>B</street><city>C</city><postcode>CB1 2AB</postcode>
@@ -171,25 +176,51 @@ describe('problems the guidance engine can already see', () => {
   </item></items>
 </purchaseOrder>
 `);
-    const messages = documentProblems(store.schema.model!, store.document).map((p) => p.message);
-    expect(messages).toContain('<purchaseOrder> is missing the required attribute orderDate.');
+    const missing = diagnose().find((d) => d.code === 'cvc-complex-type.4')!;
+    expect(missing.message).toBe('<purchaseOrder> must have orderDate.');
+
+    applyFix(missing.fixes[0]!.edit);
+    expect(store.document.serialize()).toContain('orderDate=');
   });
 
-  it('reports a value that breaks its type', () => {
+  it('reports a value that breaks its type, and offers a coercion that actually works', () => {
     load(`<purchaseOrder orderDate="2026-07-29">
   <shipTo country="GB">
-    <name>A</name><street>B</street><city>C</city><postcode>NOPE</postcode>
+    <name>A</name><street>B</street><city>C</city><postcode>cb1 2ab</postcode>
   </shipTo>
   <items><item partNum="872-AA">
     <productName>X</productName><quantity>1</quantity><price>1.00</price>
   </item></items>
 </purchaseOrder>
 `);
-    const messages = documentProblems(store.schema.model!, store.document).map((p) => p.message);
-    expect(messages.some((message) => message.includes('"NOPE" does not match'))).toBe(true);
+    const broken = diagnose().find((d) => d.code === 'cvc-pattern-valid')!;
+    expect(broken.message).toContain('Postcode');
+
+    // Uppercasing is the fix here, and the offer is only made because it was re-validated first.
+    const fix = broken.fixes.find((f) => f.preview === 'CB1 2AB')!;
+    applyFix(fix.edit);
+    expect(diagnose().filter((d) => d.code === 'cvc-pattern-valid')).toEqual([]);
   });
 
-  it('reports a quantity outside its bounds', () => {
+  it('never offers a fix that leaves the value still invalid', () => {
+    load(`<purchaseOrder orderDate="2026-07-29">
+  <shipTo country="GB">
+    <name>A</name><street>B</street><city>C</city><postcode>nonsense</postcode>
+  </shipTo>
+  <items><item partNum="872-AA">
+    <productName>X</productName><quantity>1</quantity><price>1.00</price>
+  </item></items>
+</purchaseOrder>
+`);
+    const broken = diagnose().find((d) => d.code === 'cvc-pattern-valid')!;
+    for (const fix of broken.fixes) {
+      applyFix(fix.edit);
+      expect(diagnose().filter((d) => d.code === 'cvc-pattern-valid')).toEqual([]);
+      store.undo();
+    }
+  });
+
+  it('reports a quantity outside its bounds and offers the bound', () => {
     load(`<purchaseOrder orderDate="2026-07-29">
   <shipTo country="GB">
     <name>A</name><street>B</street><city>C</city><postcode>CB1 2AB</postcode>
@@ -199,7 +230,61 @@ describe('problems the guidance engine can already see', () => {
   </item></items>
 </purchaseOrder>
 `);
-    const messages = documentProblems(store.schema.model!, store.document).map((p) => p.message);
-    expect(messages.some((message) => message.includes('at most 99'))).toBe(true);
+    const broken = diagnose().find((d) => d.code === 'cvc-range-valid')!;
+    expect(broken.message).toContain('at most 99');
+    applyFix(broken.fixes.find((f) => f.preview === '99')!.edit);
+    expect(store.document.serialize()).toContain('<quantity>99</quantity>');
+  });
+
+  it('reports an element the schema does not allow, and can remove it', () => {
+    load(`<purchaseOrder orderDate="2026-07-29">
+  <shipTo country="GB">
+    <name>A</name><street>B</street><city>C</city><postcode>CB1 2AB</postcode>
+  </shipTo>
+  <mystery/>
+  <items><item partNum="872-AA">
+    <productName>X</productName><quantity>1</quantity><price>1.00</price>
+  </item></items>
+</purchaseOrder>
+`);
+    const stray = diagnose().find((d) => d.code === 'cvc-complex-type.2.4.d')!;
+    expect(stray.message).toBe('<mystery> is not allowed inside <purchaseOrder>.');
+    applyFix(stray.fixes[0]!.edit);
+    expect(diagnose().map((d) => d.message)).toEqual([]);
+  });
+
+  it('offers a rename when the name is nearly right', () => {
+    load(`<purchaseOrder orderDate="2026-07-29">
+  <shipTo country="GB">
+    <name>A</name><street>B</street><city>C</city><postcode>CB1 2AB</postcode>
+  </shipTo>
+  <itemss/>
+</purchaseOrder>
+`);
+    const wrong = diagnose().find((d) => d.fixes.some((f) => f.title.startsWith('Change')))!;
+    applyFix(wrong.fixes.find((f) => f.title.startsWith('Change'))!.edit);
+    const source = store.document.serialize();
+    expect(source).not.toContain('itemss');
+    expect(source).toContain('<items/>');
+  });
+
+  it('fixes every problem in one element as a single undoable step', () => {
+    const source = `<purchaseOrder orderDate="2026-07-29">
+  <items/>
+  <shipTo country="GB"><name>A</name><street>B</street><city>C</city><postcode>CB1 2AB</postcode></shipTo>
+</purchaseOrder>
+`;
+    load(source);
+    const swap = diagnose().find((d) => d.fixes.length > 0)!;
+    const historyBefore = store.document.history.length;
+
+    applyFix(swap.fixes[0]!.edit);
+    expect(store.document.history.length).toBe(historyBefore + 1);
+    // The swap keeps both nodes, so what was there is still there — just in the right order.
+    expect(store.document.serialize()).toContain('<shipTo');
+    expect(store.document.serialize()).toContain('<items/>');
+
+    store.undo();
+    expect(store.document.serialize()).toBe(source);
   });
 });

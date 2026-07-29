@@ -22,6 +22,7 @@ export {
   removeAttribute,
   setTextValue,
   renameElement,
+  setNamespaceDeclaration,
 } from './document.js';
 export type { Command, NewElementSpec } from './document.js';
 

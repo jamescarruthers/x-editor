@@ -67,13 +67,18 @@ function siblingWhitespace(doc: XmlDocument, parentId: NodeId): string | null {
   return null;
 }
 
+/** The element children of a node, in order — the coordinate system alignments are expressed in. */
+export function elementChildIds(doc: XmlDocument, parentId: NodeId): NodeId[] {
+  return doc.childrenOf(parentId).filter((id) => doc.node(id)?.kind === 'element');
+}
+
 /** Element-child index → index among all children, including text and comments. */
-function childIndexFor(doc: XmlDocument, context: ElementContext, elementIndex: number): number {
-  const children = doc.childrenOf(context.nodeId);
-  const target = context.children[elementIndex];
+function childIndexAt(doc: XmlDocument, parentId: NodeId, elementIndex: number): number {
+  const children = doc.childrenOf(parentId);
+  const target = elementChildIds(doc, parentId)[elementIndex];
 
   if (target !== undefined) {
-    const found = children.indexOf(target.id);
+    const found = children.indexOf(target);
     if (found >= 0) return found;
   }
 
@@ -84,13 +89,17 @@ function childIndexFor(doc: XmlDocument, context: ElementContext, elementIndex: 
   return children.length;
 }
 
+function childIndexFor(doc: XmlDocument, context: ElementContext, elementIndex: number): number {
+  return childIndexAt(doc, context.nodeId, elementIndex);
+}
+
 /**
  * A prefix in scope for a namespace, or a declaration to write when there is none.
  *
  * Inventing a prefix on an ancestor would rewrite part of the document the user did not touch, so
  * the declaration goes on the new element instead.
  */
-function nameFor(
+export function nameForNamespace(
   doc: XmlDocument,
   parentId: NodeId,
   namespaceUri: string | null,
@@ -123,7 +132,7 @@ function buildSkeleton(
   indent: string | null,
   depth: number,
 ): { commands: Command[]; elementId: NodeId } {
-  const { name, declarations } = nameFor(
+  const { name, declarations } = nameForNamespace(
     doc,
     parentId,
     skeleton.name.namespaceUri,
@@ -165,6 +174,43 @@ function buildSkeleton(
 }
 
 /**
+ * The commands to insert one element, with its skeleton and its surrounding whitespace.
+ *
+ * Shared by the palette and the quick-fix applier so an element added by a fix is identical to one
+ * added by hand — same skeleton, same required attributes, same indentation.
+ */
+export function buildInsertCommands(
+  doc: XmlDocument,
+  parentId: NodeId,
+  elementIndex: number,
+  name: { namespaceUri: string | null; localName: string },
+): Command[] {
+  const model = store.schema.model;
+  const indent = siblingWhitespace(doc, parentId);
+  const target = childIndexAt(doc, parentId, elementIndex);
+
+  const declaration = model === null ? null : model.globalElement(name) ?? localDeclaration(model, doc, parentId, name);
+  const skeleton: SkeletonNode =
+    model === null || declaration === null
+      ? { name, attributes: [], children: [], text: null }
+      : skeletonFor(model, declaration, { maxDepth: 3 });
+
+  const { commands } = buildSkeleton(doc, parentId, target, skeleton, indent, 0);
+  return [...commands, ...separatorCommands(doc, parentId, target, indent)];
+}
+
+function localDeclaration(
+  model: SchemaModel,
+  doc: XmlDocument,
+  parentId: NodeId,
+  name: { namespaceUri: string | null; localName: string },
+) {
+  const context = store.contextFor(parentId);
+  if (context === null || context.type.form !== 'complex') return null;
+  return model.elementDeclarationIn(context.type, name);
+}
+
+/**
  * Insert one palette choice at the position its content model expects.
  *
  * `apply` is called during construction so nested indices are computed against the document as it
@@ -172,26 +218,10 @@ function buildSkeleton(
  * what makes the whole insertion one undo step.
  */
 export function insertPlanned(context: ElementContext, candidate: PlannedInsert): void {
-  const model = store.schema.model;
-  const doc = store.document;
-  if (model === null) return;
-
-  const parentIndent = siblingWhitespace(doc, context.nodeId);
-  const target = childIndexFor(doc, context, candidate.index);
-
-  const skeleton: SkeletonNode =
-    candidate.declaration === null
-      ? { name: candidate.name, attributes: [], children: [], text: null }
-      : skeletonFor(model, candidate.declaration, { maxDepth: 3 });
-
-  const commands: Command[] = [];
-  const { commands: built } = buildSkeleton(doc, context.nodeId, target, skeleton, parentIndent, 0);
-  commands.push(...built);
-
-  const composed = compose(`Added <${candidate.name.localName}>`, [
-    ...commands,
-    ...separatorCommands(doc, context.nodeId, target, parentIndent),
-  ]);
+  const composed = compose(
+    `Added <${candidate.name.localName}>`,
+    buildInsertCommands(store.document, context.nodeId, candidate.index, candidate.name),
+  );
   if (composed !== null) store.run(composed);
 }
 
@@ -251,15 +281,7 @@ export function insertAllRequired(model: SchemaModel, context: ElementContext): 
     );
     if (planned === undefined) break;
 
-    const indent = siblingWhitespace(doc, current.nodeId);
-    const target = childIndexFor(doc, current, planned.index);
-    const skeleton: SkeletonNode =
-      planned.declaration === null
-        ? { name: next, attributes: [], children: [], text: null }
-        : skeletonFor(model, planned.declaration, { maxDepth: 3 });
-
-    const { commands } = buildSkeleton(doc, current.nodeId, target, skeleton, indent, 0);
-    for (const command of [...commands, ...separatorCommands(doc, current.nodeId, target, indent)]) {
+    for (const command of buildInsertCommands(doc, current.nodeId, planned.index, next)) {
       command.apply(doc);
       collected.push(command);
     }

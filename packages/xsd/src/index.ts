@@ -186,5 +186,24 @@ export type {
   SkeletonOptions,
 } from './query.js';
 
-export { validateDocument, isDocumentValid } from './validate.js';
-export type { DocumentProblem, ValidateOptions } from './validate.js';
+export { validateDocument, isDocumentValid, explainType, wouldBeValid } from './diagnostics.js';
+export type {
+  Diagnostic,
+  DiagnosticAnchor,
+  FixEdit,
+  QuickFix,
+  ValidateOptions,
+} from './diagnostics.js';
+
+export {
+  alignToModel,
+  applyOperations,
+  describeEdit,
+  isPlausibleRename,
+  nameDistance,
+  levenshtein,
+} from './alignment.js';
+export type { Alignment, EditKind, EditOperation } from './alignment.js';
+
+export { serializeForValidation, nodeForLine } from './validationSerializer.js';
+export type { ValidationPayload } from './validationSerializer.js';

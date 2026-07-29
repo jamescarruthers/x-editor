@@ -1,6 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { store, useEditor } from '../state/store.js';
 import { documentProblems } from '../model/problems.js';
+import { applyFix } from '../model/fixes.js';
+import type { Diagnostic } from '@x-editor/xsd';
 
 /** The serialized document, live. Proof the splice serializer is preserving what it should. */
 export function SourcePanel(): React.JSX.Element {
@@ -110,16 +112,85 @@ export function ProblemsPanel(): React.JSX.Element {
         />
       ))}
 
-      {documentIssues.map((problem, i) => (
-        <ProblemRow
-          key={`doc-${i}`}
-          severity={problem.severity}
-          message={problem.message}
-          detail={`${problem.path} · ${problem.code}`}
-          onClick={() => store.select(problem.nodeId)}
-        />
+      {documentIssues.map((diagnostic, i) => (
+        <DiagnosticRow key={`doc-${i}`} diagnostic={diagnostic} />
       ))}
     </ul>
+  );
+}
+
+/**
+ * A schema diagnostic, with its fixes.
+ *
+ * The fix buttons sit on the row rather than behind a menu: the whole point is that the beginner
+ * does not have to work out what to do, and a fix hidden one click away is a fix most people never
+ * find. The spec-ese goes behind "details", where it is available and not in the way.
+ */
+function DiagnosticRow({ diagnostic }: { diagnostic: Diagnostic }): React.JSX.Element {
+  const [showTechnical, setShowTechnical] = useState(false);
+
+  return (
+    <li className="border-b px-3 py-1.5" style={{ borderColor: 'var(--border-subtle)' }}>
+      <button
+        type="button"
+        onClick={() => store.select(diagnostic.node)}
+        className="flex w-full items-start gap-2 text-left"
+      >
+        <span
+          className="mt-0.5 shrink-0 text-[11px]"
+          style={{ color: diagnostic.severity === 'error' ? 'var(--error)' : 'var(--text-tertiary)' }}
+          aria-hidden
+        >
+          {diagnostic.severity === 'error' ? '\u2715' : '!'}
+        </span>
+        <span className="min-w-0" style={{ color: 'var(--text-primary)' }}>
+          {diagnostic.message}
+        </span>
+      </button>
+
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-5">
+        {diagnostic.fixes.map((fix) => (
+          <button
+            key={fix.title}
+            type="button"
+            onClick={() => applyFix(fix.edit)}
+            title={fix.preview === undefined ? undefined : `Result: ${fix.preview}`}
+            className="rounded border px-1.5 py-0.5 text-[11px]"
+            style={{
+              borderColor: 'var(--border-default)',
+              background: 'var(--surface-0)',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            {fix.title}
+            {fix.speculative === true && (
+              // A fix that guesses at intent must say so. Quietly inventing data is the one way
+              // this feature could leave the user worse off than no fix at all.
+              <span className="ml-1" style={{ color: 'var(--text-tertiary)' }} title="A guess — check the result">
+                ?
+              </span>
+            )}
+          </button>
+        ))}
+
+        <button
+          type="button"
+          onClick={() => setShowTechnical((v) => !v)}
+          className="text-[11px] hover:underline"
+          style={{ color: 'var(--text-tertiary)' }}
+          aria-expanded={showTechnical}
+        >
+          {showTechnical ? 'hide details' : 'details'}
+        </button>
+      </div>
+
+      {showTechnical && (
+        <div className="mt-1 pl-5 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+          <div className="font-mono">{diagnostic.technical}</div>
+          <div>{diagnostic.path}</div>
+        </div>
+      )}
+    </li>
   );
 }
 
