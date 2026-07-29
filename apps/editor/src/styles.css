@@ -1,0 +1,124 @@
+@import 'tailwindcss';
+
+/*
+ * Two token layers, as the UX spec sets out: primitives, then semantic aliases. Dark mode re-points
+ * the same alias names, so no component ever branches on theme.
+ */
+@theme {
+  --font-sans:
+    'Inter var', Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+:root {
+  --row-h: 28px;
+  --indent: 16px;
+
+  --surface-0: oklch(99% 0.002 265);
+  --surface-1: oklch(97.5% 0.003 265);
+  --surface-2: oklch(95% 0.004 265);
+  --surface-3: oklch(92% 0.005 265);
+  --border-subtle: oklch(91% 0.006 265);
+  --border-default: oklch(86% 0.008 265);
+  --border-strong: oklch(74% 0.012 265);
+  --text-primary: oklch(24% 0.012 265);
+  --text-secondary: oklch(46% 0.012 265);
+  --text-tertiary: oklch(60% 0.012 265);
+  --accent: oklch(55% 0.19 258);
+  --accent-soft: oklch(94% 0.04 258);
+  --error: oklch(55% 0.2 25);
+  --error-soft: oklch(95% 0.04 25);
+  --warning: oklch(65% 0.16 75);
+  --warning-soft: oklch(95% 0.05 75);
+  --ok: oklch(58% 0.14 150);
+  --ok-soft: oklch(95% 0.04 150);
+}
+
+:root[data-theme='dark'] {
+  --surface-0: oklch(19% 0.008 265);
+  --surface-1: oklch(22% 0.009 265);
+  --surface-2: oklch(26% 0.01 265);
+  --surface-3: oklch(30% 0.011 265);
+  --border-subtle: oklch(30% 0.012 265);
+  --border-default: oklch(36% 0.014 265);
+  --border-strong: oklch(48% 0.016 265);
+  --text-primary: oklch(95% 0.006 265);
+  --text-secondary: oklch(75% 0.01 265);
+  --text-tertiary: oklch(60% 0.012 265);
+  --accent: oklch(70% 0.16 258);
+  --accent-soft: oklch(32% 0.07 258);
+  --error: oklch(70% 0.17 25);
+  --error-soft: oklch(31% 0.07 25);
+  --warning: oklch(78% 0.14 75);
+  --warning-soft: oklch(32% 0.06 75);
+  --ok: oklch(72% 0.13 150);
+  --ok-soft: oklch(30% 0.05 150);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --surface-0: oklch(19% 0.008 265);
+    --surface-1: oklch(22% 0.009 265);
+    --surface-2: oklch(26% 0.01 265);
+    --surface-3: oklch(30% 0.011 265);
+    --border-subtle: oklch(30% 0.012 265);
+    --border-default: oklch(36% 0.014 265);
+    --border-strong: oklch(48% 0.016 265);
+    --text-primary: oklch(95% 0.006 265);
+    --text-secondary: oklch(75% 0.01 265);
+    --text-tertiary: oklch(60% 0.012 265);
+    --accent: oklch(70% 0.16 258);
+    --accent-soft: oklch(32% 0.07 258);
+    --error: oklch(70% 0.17 25);
+    --error-soft: oklch(31% 0.07 25);
+    --warning: oklch(78% 0.14 75);
+    --warning-soft: oklch(32% 0.06 75);
+    --ok: oklch(72% 0.13 150);
+    --ok-soft: oklch(30% 0.05 150);
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular numerals so cardinality chips line up: "1 of 3" against "10 of 30". */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+/*
+ * Deliberately no height animation on expand/collapse — it janks badly on a virtualized list.
+ * Only the twisty rotates.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
