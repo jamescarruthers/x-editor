@@ -517,6 +517,37 @@ suite('component view', () => {
     expect(rows.some((row) => row.id === code)).toBe(true);
   });
 
+  it('gives every row its own id, headings included', () => {
+    // The bug this pins: every heading row used to be addressed by the schema element, so all eight
+    // shared one id. The virtualizer keys rows by id and positions them absolutely, so React reused
+    // the same DOM node for several headings and they stacked on top of each other; the document
+    // carried eight copies of one element id; and selecting the root painted every heading at once.
+    const document = parse(NO_NAMESPACE);
+    const rows = buildComponentRows(document, expandAll(document));
+
+    const ids = rows.map((row) => row.id);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    // And a heading is never confusable with the element it groups.
+    const rootId = document.documentElement()!;
+    expect(rows.filter((row) => row.heading !== undefined).length).toBeGreaterThan(1);
+    expect(rows.some((row) => row.heading !== undefined && row.id === rootId)).toBe(false);
+  });
+
+  it('collapses one heading without disturbing the others', () => {
+    const document = parse(NO_NAMESPACE);
+    const rootId = document.documentElement()!;
+    const headings = (open: Set<NodeId>): string[] =>
+      buildComponentRows(document, open)
+        .filter((row) => row.heading !== undefined)
+        .map((row) => row.heading!);
+
+    const before = headings(new Set());
+    const after = headings(new Set([headingKey(rootId, 'Simple types')]));
+    // Collapsing a group hides its members, never its own heading or anyone else's.
+    expect(after).toEqual(before);
+  });
+
   it('collapses a heading without collapsing the element it addresses', () => {
     // The heading rows are synthetic, so their expansion state is encoded outside the real NodeId
     // range — otherwise collapsing "Simple types" would collapse the schema element itself.

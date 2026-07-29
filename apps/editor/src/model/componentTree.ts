@@ -47,19 +47,21 @@ export function buildComponentRows(document: XmlDocument, expanded: ReadonlySet<
   for (const group of groups) {
     if (group.members.length === 0) continue;
 
-    // The heading addresses the schema element, so selecting one is meaningful rather than inert.
-    const headingNode = document.node(rootId)!;
-    const open = !expanded.has(headingKey(rootId, group.heading));
+    // A heading is addressed by its own key, not by the schema element it groups. Addressing the
+    // root meant all eight headings shared one id — so React saw duplicate keys and stacked their
+    // rows on top of each other, the DOM carried eight copies of `node-<root>`, and selecting the
+    // root painted every heading as selected at once.
+    const key = headingKey(rootId, group.heading);
+    const open = !expanded.has(key);
     rows.push({
-      id: rootId,
+      id: key,
       depth: 0,
-      node: headingNode,
+      node: document.node(rootId)!,
       hasChildren: true,
       expanded: open,
       ordinal: 1,
       siblingCount: 1,
       heading: `${group.heading} (${group.members.length})`,
-      headingKey: headingKey(rootId, group.heading),
     });
 
     if (!open) continue;
@@ -96,10 +98,16 @@ export function buildComponentRows(document: XmlDocument, expanded: ReadonlySet<
   return rows;
 }
 
-/** A stable key for a synthetic heading row, so its collapsed state survives edits. */
+/**
+ * The id of a synthetic heading row, so its collapsed state survives edits.
+ *
+ * Encoded into the NodeId space rather than a parallel set: expansion, selection and row identity
+ * are all keyed by NodeId everywhere else, and a second mechanism would be one more thing to keep in
+ * step. Negative by construction, so it can never collide with a real node — and every consumer of a
+ * NodeId already treats one it cannot resolve as "nothing", which is the honest answer for a section
+ * header.
+ */
 export function headingKey(rootId: NodeId, heading: string): NodeId {
-  // Encoded into the NodeId space rather than a parallel set: the expansion state is keyed by
-  // NodeId everywhere else, and a second mechanism would be one more thing to keep in step.
   return (-(rootId + 1) * 100 - HEADINGS.indexOf(heading)) as NodeId;
 }
 
