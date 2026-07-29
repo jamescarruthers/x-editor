@@ -80,6 +80,9 @@ importers:
       '@x-editor/xml-core':
         specifier: workspace:*
         version: link:../xml-core
+      fontoxpath:
+        specifier: ^3.34.0
+        version: 3.34.0
     devDependencies:
       libxml2-wasm:
         specifier: 0.7.1
@@ -753,6 +756,9 @@ packages:
       picomatch:
         optional: true
 
+  fontoxpath@3.34.0:
+    resolution: {integrity: sha512-7FgBQRohn4WR/2eVdYqZtKBFZkJNaiP4kGdfqS6bAg465og05ixGA2OgfMdxsO1mnX67+64JX/8JKclVqS+bzA==}
+
   fsevents@2.3.2:
     resolution: {integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
@@ -916,6 +922,9 @@ packages:
   postcss@8.5.24:
     resolution: {integrity: sha512-8RyVklq0owXUTa4xlpzu4l9AaVKIdQvAcOHZWaMh98HgySsUtxRVf/chRe3dsSLqb6i40BzGRzEUddRaI+9TSw==}
     engines: {node: ^10 || ^12 || >=14}
+
+  prsc@4.0.0:
+    resolution: {integrity: sha512-OmXQ2v76RlXNx/gqv7+oB6jyKnudJ/rsMfAIVexhbDFxXAJPoWKMxJkZU2ohlu4miCiSQCG+horf2DV4/kNc1Q==}
 
   pure-rand@6.1.0:
     resolution: {integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==}
@@ -1086,8 +1095,14 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
+  whynot@5.0.0:
+    resolution: {integrity: sha512-cGGfDPYYqoHoMWqXVc3G+N74u1FhFhrBa+pOO906b9ktRc/JFUdwroTkfPqjKzyoCLVcKr6yy6bYIcWT7jTg2A==}
+
   xmlchars@2.2.0:
     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
+
+  xspattern@3.1.0:
+    resolution: {integrity: sha512-rxtOX8ORJizRqswIdZ72G3thKrHd0Q+TvyUCMByc5VdjDz1nkuZKfPXM3xGdrGi0fwEy+DDJN7DqtAZ06Re4bA==}
 
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
@@ -1644,6 +1659,11 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.5
 
+  fontoxpath@3.34.0:
+    dependencies:
+      prsc: 4.0.0
+      xspattern: 3.1.0
+
   fsevents@2.3.2:
     optional: true
 
@@ -1752,6 +1772,8 @@ snapshots:
       nanoid: 3.3.16
       picocolors: 1.1.1
       source-map-js: 1.2.1
+
+  prsc@4.0.0: {}
 
   pure-rand@6.1.0: {}
 
@@ -1925,6 +1947,12 @@ snapshots:
       siginfo: 2.0.0
       stackback: 0.0.2
 
+  whynot@5.0.0: {}
+
   xmlchars@2.2.0: {}
+
+  xspattern@3.1.0:
+    dependencies:
+      whynot: 5.0.0
 
   yallist@3.1.1: {}

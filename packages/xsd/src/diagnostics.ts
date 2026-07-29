@@ -39,11 +39,13 @@ import {
   attributeStatuses,
   elementContext,
   insertionPlan,
+  modelChildNames,
   requiredMissing,
   textTypeOf,
   type ElementContext,
 } from './query.js';
 import { describeFacets, humaniseName } from './describe.js';
+import { evaluateBoolean } from './xpath.js';
 
 // --- the fix vocabulary -------------------------------------------------
 
@@ -150,6 +152,82 @@ function diagnoseElement(
   out.push(...diagnoseAttributes(model, document, context, path));
   out.push(...diagnoseChildren(model, document, context, path));
   out.push(...diagnoseText(model, document, context, path));
+  out.push(...diagnoseAssertions(model, document, context, path));
+  return out;
+}
+
+// --- XSD 1.1: xs:assert -------------------------------------------------
+
+/**
+ * `xs:assert` — an XPath 2.0 expression the element has to satisfy.
+ *
+ * This is the 1.1 feature that pays for the whole XPath layer, and it is where co-occurrence rules
+ * live: "a discount needs a reason", "the end date is after the start date". XSD 1.0 cannot express
+ * either, which is why so many schemas that need them ship a Schematron file alongside.
+ *
+ * Two rules from the spec are load-bearing rather than pedantic. The element is evaluated **in
+ * isolation** — an assertion may not look at its ancestors, so that an element is checkable
+ * wherever it ends up. And a *failing* assertion and a *broken* assertion are different problems:
+ * the first is the user's, the second is the schema author's, and reporting them the same way sends
+ * the user hunting for a mistake they did not make.
+ */
+function diagnoseAssertions(
+  model: SchemaModel,
+  document: XmlDocument,
+  context: ElementContext,
+  path: string,
+): Diagnostic[] {
+  if (context.type.form !== 'complex' || context.type.assertions.length === 0) return [];
+  const out: Diagnostic[] = [];
+
+  for (const assertion of context.type.assertions) {
+    const outcome = evaluateBoolean(document, context.nodeId, assertion.test, {
+      namespaces: assertion.namespaces,
+      defaultNamespace: assertion.xpathDefaultNamespace,
+      isolate: context.nodeId,
+    });
+
+    if (!outcome.ok) {
+      // Not yet loaded is not a finding: the assertion will be checked as soon as the engine
+      // arrives, and claiming a problem in the meantime would be a lie that clears itself.
+      if (outcome.error.notLoaded === true) continue;
+      out.push({
+        code: 'schema-assert-broken',
+        severity: 'warning',
+        node: context.nodeId,
+        anchor: 'element',
+        path,
+        message: `A rule on <${context.name.localName}> could not be checked, because the schema's own expression does not work: ${outcome.error.message}`,
+        technical: `The xs:assert test "${assertion.test}" failed to evaluate.`,
+        schemaComponent: assertion.origin,
+        fixes: [],
+      });
+      continue;
+    }
+
+    if (outcome.value) continue;
+
+    // The author's own words if they wrote any — they know their domain and we do not — falling
+    // back to the expression, which at least says precisely what was checked.
+    const authored = assertion.annotation?.documentation ?? '';
+    out.push({
+      code: 'cvc-assertion-valid',
+      severity: 'error',
+      node: context.nodeId,
+      anchor: 'element',
+      path,
+      message:
+        authored === ''
+          ? `<${context.name.localName}> breaks a rule in the schema: ${assertion.test}`
+          : authored,
+      technical: `cvc-assertion-valid: the xs:assert test "${assertion.test}" is false.`,
+      schemaComponent: assertion.origin,
+      // An assertion is arbitrary logic, so there is nothing general to offer. Guessing an edit that
+      // might satisfy it would be exactly the "quietly invents data" failure the fix system avoids.
+      fixes: [],
+    });
+  }
+
   return out;
 }
 
@@ -443,7 +521,7 @@ function diagnoseChildren(
 ): Diagnostic[] {
   if (context.type.form !== 'complex') return [];
   const content = model.contentModel(context.type);
-  const childNames = context.children.map((child) => child.name);
+  const childNames = modelChildNames(context);
 
   if (content.kind === 'empty' && childNames.length > 0) {
     return [

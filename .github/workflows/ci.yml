@@ -27,6 +27,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The XSD 1.1 differential oracle. libxml2 is 1.0-only and will not compile a schema using
+      # xs:assert, so without this our engine would be the only 1.1 implementation in the stack and
+      # nothing would check it. Pure Python, so there is nothing to build.
+      - name: Install the XSD 1.1 oracle
+        run: python3 -m pip install --quiet --break-system-packages xmlschema==4.3.2
+
       - name: Typecheck
         run: pnpm -r typecheck
 
@@ -35,3 +41,9 @@ jobs:
 
       - name: Build
         run: pnpm -C apps/editor build
+
+      # PLAN.md §11 risk 4: a stray top-level import pulling a validator into the main chunk is a
+      # one-line mistake that costs every user the download and looks like nothing. It has happened
+      # once already, so it is checked rather than remembered.
+      - name: Check the bundle budget
+        run: node scripts/check-bundle.mjs

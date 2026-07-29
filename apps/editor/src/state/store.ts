@@ -6,7 +6,7 @@ import {
   type NodeId,
   type ParseError,
 } from '@x-editor/xml-core';
-import type { ElementContext, SchemaDiagnostic } from '@x-editor/xsd';
+import { loadXPath, type ElementContext, type SchemaDiagnostic } from '@x-editor/xsd';
 import { SchemaStore } from './schema.js';
 import { ValidationClient } from './validation.js';
 
@@ -157,6 +157,13 @@ class EditorStore {
     this.verdict.setSchema(this.schema.sources(), fileName);
     this.verdict.request(this.doc);
     this.emit();
+
+    // A 1.1 schema needs XPath to check its assertions. Fetching it here rather than at startup is
+    // why a 1.0 user never downloads it; re-emitting afterwards is what makes the assertions appear
+    // once it lands, instead of staying invisible until the next edit.
+    if (this.schema.needsXPath) {
+      void loadXPath().then(() => this.emit());
+    }
   }
 
   detachSchema(): void {

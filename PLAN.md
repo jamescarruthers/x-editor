@@ -4,12 +4,13 @@ A browser-based, tree-node editor for **XML**, **XSD** and **Schematron**, with 
 validation running client-side, designed so that someone who does not already know the schema can
 still produce a valid document.
 
-**Status:** Phases 0–4 implemented. `packages/xml-core` (lossless CST, command log, splice
+**Status:** Phases 0–4b implemented. `packages/xml-core` (lossless CST, command log, splice
 serializer), `packages/xsd` (schema front end, simple- and complex-type compilers, Glushkov
 automaton, query API) and `apps/editor` (four-region shell, virtualized tree, Insert palette,
 schema-driven Inspector), `packages/validation-protocol` and `packages/xsd-libxml2` (the
-authoritative verdict, in a worker) are in place, with ~400 tests. Every verdict is checked against
-`libxml2-wasm` both in CI and, from Phase 4, live in the editor. **Phase 4b — XSD 1.1 — is next.** See §10 for the roadmap and
+authoritative verdict, in a worker) are in place, with ~445 tests. Verdicts are checked against
+`libxml2-wasm` for XSD 1.0 — in CI and live in the editor — and against `xmlschema` under CPython for
+1.1. **Phase 5 — Schematron — is next**, and the XPath layer it needs is already built and tested. See §10 for the roadmap and
 the per-phase *done when*.
 
 **Companion documents**
@@ -517,13 +518,28 @@ The repair algorithm is Oflazer error-tolerant alignment, as specified, and a pr
 that every alignment it proposes produces a child list the reference matcher accepts — a quick fix
 that leaves the document invalid would be worse than none.
 
-### Phase 4b — XSD 1.1 (medium)
+### Phase 4b — XSD 1.1 (medium) — **done, bar the conformance rate**
 `xs:assert` and `xs:alternative` evaluated through fontoxpath (already present), `openContent`,
 `xs:override`, relaxed `xs:all`, relaxed UPA. Version dispatch on the schema's `vc:minVersion` /
 declared version. `xmlschema`-under-Pyodide wired in as the lazily-loaded conformance check, and as
 the CI oracle for 1.1.
 **Done when:** the W3C XSD 1.1 test set passes at a published rate, and a schema using `xs:assert`
 gives guidance and a verdict that agree with `xmlschema`.
+
+The second half holds: `packages/xsd/test/differential11.test.ts` checks every 1.1 verdict against
+`xmlschema` 4.3.2 under CPython, in CI. The first half waits on the same thing Phase 3's does — the
+W3C test collection is not yet vendored, so there is no rate to publish and none is claimed.
+
+Two things came out differently from the plan's expectation, both for the better. **`xs:openContent`
+never reaches the automaton**: interleaved open content would mean interleaving the whole model with
+a wildcard loop, an explosion in states, when the same semantics fall out of removing the
+wildcard-matched children before the model runs. And **version dispatch does not trust
+`vc:minVersion`** — a schema using 1.1 constructs *is* 1.1 whether or not it says so, and detecting
+that structurally is what stops the 1.0 oracle being pointed at a 1.1 schema.
+
+The XPath layer is the phase's real asset: `packages/xsd/src/xpath.ts` makes the CST itself the
+XPath data model through fontoxpath's `IDomFacade`, so there is no second DOM to keep in sync.
+Phase 5's Schematron interpreter and its live XPath editor both sit directly on it.
 
 ### Phase 5 — Schematron (medium)
 The fontoxpath interpreter (from `node-schematron`), the Schematron editor mode, the live test
@@ -564,6 +580,10 @@ Mixed-content editor, XSD diagram, table view for repeated siblings, PWA/offline
 4. **Bundle weight.** Two engines plus CodeMirror plus fontoxpath is multiple MB. *Mitigation:*
    rigorous lazy loading per mode, `size-limit` failing the build on regression. A stray top-level
    import pulling a validator into the main chunk is the failure mode.
+   *Status:* **this has already happened once** — adding XSD 1.1 assertions statically imported
+   fontoxpath and put 330KB into the entry chunk. `scripts/check-bundle.mjs` now runs in CI and
+   fails the build on both the size and the chunk separation, since a one-line mistake that looks
+   like nothing has to be caught mechanically rather than remembered.
 5. **`libxml2-wasm` is pre-1.0** and its schema import/include support is experimental. *Mitigation:*
    pin exactly, wrap behind the `XsdEngine` interface, keep `xmllint-wasm` working in CI.
 6. **Memory, not CPU, is the ceiling.** A 50MB instance expands to 400–600MB inside the wasm32 heap and

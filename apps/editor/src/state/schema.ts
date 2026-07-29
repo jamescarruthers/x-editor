@@ -27,9 +27,19 @@ export class SchemaStore {
   attach(fileName: string, source: string): SchemaDiagnostic[] {
     this.catalogue = { ...this.catalogue, [fileName]: source };
     this.name = fileName;
-    this.model = new SchemaModel(assembleSchema(fileName, catalogueFrom(this.catalogue)));
+    const set = assembleSchema(fileName, catalogueFrom(this.catalogue));
+    this.model = new SchemaModel(set);
+    this.needsXPath = set.declaredVersion === '1.1';
     return this.model.allDiagnostics();
   }
+
+  /**
+   * True when the schema uses XSD 1.1 constructs, which are the only thing that needs XPath.
+   *
+   * The engine is ~330KB and most schemas are 1.0, so it is fetched on demand rather than shipped
+   * to everyone — the lazy-loading discipline PLAN.md §11 risk 4 asks for.
+   */
+  needsXPath = false;
 
   /** Adds a supporting document — one an `include` or `import` referenced — without re-rooting. */
   addSupporting(fileName: string, source: string): void {

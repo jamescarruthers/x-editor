@@ -125,6 +125,29 @@ export type RawParticle = RawElementParticle | RawGroupRef | RawModelGroup | Raw
 
 // --- declarations -------------------------------------------------------
 
+/**
+ * XSD 1.1 conditional type assignment: `<xs:alternative test="…" type="…"/>`.
+ *
+ * The element's type is chosen at validation time from its own attributes — the standard way to
+ * express "a payment of kind 'card' has these fields, one of kind 'transfer' has those". A final
+ * alternative with no test is the fallback.
+ */
+export interface RawTypeAlternative {
+  readonly origin: Origin;
+  readonly test: string | null;
+  readonly type: XsdQName | null;
+  readonly inlineType: RawType | null;
+  readonly xpathDefaultNamespace: string | null;
+  readonly namespaces: Readonly<Record<string, string>>;
+}
+
+/** XSD 1.1 `xs:openContent` — a wildcard that applies alongside the declared content model. */
+export interface RawOpenContent {
+  readonly origin: Origin;
+  readonly mode: 'none' | 'interleave' | 'suffix';
+  readonly wildcard: RawAny | null;
+}
+
 export interface RawElement {
   readonly origin: Origin;
   /** Null exactly when this is a `ref=`. */
@@ -152,6 +175,8 @@ export interface RawElement {
   readonly block: DerivationSet | null;
   readonly final: DerivationSet | null;
   readonly identityConstraints: readonly RawIdentityConstraint[];
+  /** XSD 1.1 conditional type assignment, in declaration order. */
+  readonly alternatives: readonly RawTypeAlternative[];
   readonly annotation: Annotation | null;
 }
 
@@ -241,6 +266,14 @@ export interface RawAssertion {
   readonly origin: Origin;
   readonly test: string;
   readonly xpathDefaultNamespace: string | null;
+  /**
+   * Prefix bindings in scope where the expression was written.
+   *
+   * Captured at parse time for the same reason QName-valued attributes are resolved there: an XPath
+   * in a schema means what the *schema's* prefixes say, and resolving it later against the instance
+   * document's prefixes is the classic way to get a subtly wrong answer.
+   */
+  readonly namespaces: Readonly<Record<string, string>>;
   readonly annotation: Annotation | null;
 }
 
@@ -304,6 +337,7 @@ export interface RawComplexType extends RawAttributeOwner {
   readonly final: DerivationSet | null;
   readonly content: RawComplexContent;
   readonly assertions: readonly RawAssertion[];
+  readonly openContent: RawOpenContent | null;
   readonly annotation: Annotation | null;
 }
 

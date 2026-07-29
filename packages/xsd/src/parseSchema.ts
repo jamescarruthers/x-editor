@@ -28,6 +28,7 @@ import {
   type Occurs,
   type Origin,
   type ProcessContents,
+  type RawAny,
   type RawAnyAttribute,
   type RawAssertion,
   type RawAttribute,
@@ -45,8 +46,10 @@ import {
   type RawSchema,
   type RawSchemaComponents,
   type RawSimpleDerivation,
+  type RawOpenContent,
   type RawSimpleType,
   type RawType,
+  type RawTypeAlternative,
   type SchemaDiagnostic,
   type XsdQName,
 } from './ast.js';
@@ -488,6 +491,7 @@ class SchemaParser {
     const form = options.global ? 'qualified' : this.formAttr(id, this.elementFormDefault);
     let inlineType: RawSimpleType | RawComplexType | null = null;
     const identityConstraints: RawIdentityConstraint[] = [];
+    const alternatives: RawTypeAlternative[] = [];
 
     for (const child of this.xsdChildren(id)) {
       switch (child.name) {
@@ -501,6 +505,9 @@ class SchemaParser {
         case 'keyref':
         case 'unique':
           identityConstraints.push(this.identityConstraint(child.id, child.name));
+          break;
+        case 'alternative':
+          alternatives.push(this.typeAlternative(child.id));
           break;
         default:
           break;
@@ -533,8 +540,47 @@ class SchemaParser {
       block: this.derivationSet(id, 'block'),
       final: this.derivationSet(id, 'final'),
       identityConstraints,
+      alternatives,
       annotation: this.annotation(id),
     };
+  }
+
+  private typeAlternative(id: NodeId): RawTypeAlternative {
+    let inlineType: RawType | null = null;
+    for (const child of this.xsdChildren(id)) {
+      if (child.name === 'simpleType') inlineType = this.simpleType(child.id, { global: false });
+      else if (child.name === 'complexType') inlineType = this.complexType(child.id, { global: false });
+    }
+    return {
+      origin: this.origin(id),
+      // No @test at all is the fallback alternative, which is why this is nullable rather than
+      // defaulting to "true()" — the distinction matters when reporting a schema that has two.
+      test: this.attr(id, 'test'),
+      type: this.qnameAttr(id, 'type'),
+      inlineType,
+      xpathDefaultNamespace: this.attr(id, 'xpathDefaultNamespace'),
+      namespaces: Object.fromEntries(this.doc.inScopeNamespaces(id)),
+    };
+  }
+
+  private openContent(id: NodeId): RawOpenContent | null {
+    for (const child of this.xsdChildren(id)) {
+      if (child.name !== 'openContent' && child.name !== 'defaultOpenContent') continue;
+      const rawMode = this.attr(child.id, 'mode');
+      const mode =
+        rawMode === 'none' || rawMode === 'interleave' || rawMode === 'suffix'
+          ? rawMode
+          : 'interleave';
+
+      let wildcard: RawAny | null = null;
+      for (const grandchild of this.xsdChildren(child.id)) {
+        if (grandchild.name !== 'any') continue;
+        const particle = this.particle(grandchild.id, 'any');
+        if (particle?.kind === 'any') wildcard = particle;
+      }
+      return { origin: this.origin(child.id), mode, wildcard };
+    }
+    return null;
   }
 
   private attributeDeclaration(id: NodeId, options: { global: boolean }): RawAttribute {
@@ -802,6 +848,7 @@ class SchemaParser {
       origin: this.origin(id),
       test: test ?? 'true()',
       xpathDefaultNamespace: this.attr(id, 'xpathDefaultNamespace'),
+      namespaces: Object.fromEntries(this.doc.inScopeNamespaces(id)),
       annotation: this.annotation(id),
     };
   }
@@ -841,6 +888,7 @@ class SchemaParser {
       final: this.derivationSet(id, 'final'),
       content,
       assertions,
+      openContent: this.openContent(id),
       annotation: this.annotation(id),
       ...attributeOwner,
     };

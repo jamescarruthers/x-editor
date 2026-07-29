@@ -40,6 +40,8 @@ export {
 } from './ast.js';
 export type {
   Annotation,
+  RawOpenContent,
+  RawTypeAlternative,
   AttributeUseKind,
   CompositionKind,
   DerivationControl,
@@ -141,6 +143,7 @@ export type {
   CompiledType,
   ContentKind,
   ContentModel,
+  OpenContent,
   Wildcard,
 } from './model.js';
 
@@ -207,3 +210,16 @@ export type { Alignment, EditKind, EditOperation } from './alignment.js';
 
 export { serializeForValidation, nodeForLine } from './validationSerializer.js';
 export type { ValidationPayload } from './validationSerializer.js';
+
+export {
+  CstDomFacade,
+  loadXPath,
+  xpathReady,
+  evaluateBoolean,
+  evaluateNodes,
+  evaluateString,
+  checkExpression,
+} from './xpath.js';
+export type { XPathNode, XPathNodeRef, XPathOptions, XPathOutcome, XPathFailure } from './xpath.js';
+
+export { modelChildNames } from './query.js';
