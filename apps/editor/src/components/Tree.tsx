@@ -4,6 +4,8 @@ import { qnameToString, type NodeId } from '@x-editor/xml-core';
 import { store, useEditor } from '../state/store.js';
 import { missingRequiredAttributes, requiredMissing } from '@x-editor/xsd';
 import { buildRows, nodeLabel, textPreview, type Row } from '../model/rows.js';
+import { buildComponentRows } from '../model/componentTree.js';
+import { isFlowElement } from '../model/mixed.js';
 
 const ROW_HEIGHT = 28;
 
@@ -27,7 +29,10 @@ export function Tree(): React.JSX.Element {
   const typeahead = useRef<{ buffer: string; at: number }>({ buffer: '', at: 0 });
 
   const rows = useMemo(
-    () => buildRows(doc, store.expanded),
+    () =>
+      store.componentView
+        ? buildComponentRows(doc, store.expanded)
+        : buildRows(doc, store.expanded, (id) => isFlowElement(doc, store.schema.model, id)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [doc, store.getSnapshot()],
   );
@@ -37,6 +42,14 @@ export function Tree(): React.JSX.Element {
     rows.forEach((row, i) => map.set(row.id, i));
     return map;
   }, [rows]);
+
+  // Computed once per render rather than per row: the virtualizer renders about thirty rows and the
+  // placeholder list can be hundreds long, so per-row scanning would be a product of the two.
+  const pending = useMemo(
+    () => new Set(store.pending.map((placeholder) => placeholder.node)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.getSnapshot()],
+  );
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -157,6 +170,7 @@ export function Tree(): React.JSX.Element {
               top={item.start}
               posInSet={item.index + 1}
               setSize={rows.length}
+              pending={pending}
             />
           );
         })}
@@ -171,16 +185,19 @@ function TreeRow({
   top,
   posInSet,
   setSize,
+  pending,
 }: {
   row: Row;
   selected: boolean;
   top: number;
   posInSet: number;
   setSize: number;
+  pending: ReadonlySet<NodeId>;
 }): React.JSX.Element {
   const doc = store.document;
   const node = row.node;
   const preview = node.kind === 'element' ? textPreview(doc, row.id) : null;
+  const unreviewed = pending.has(row.id);
 
   const attributes =
     node.kind === 'element'
@@ -213,7 +230,7 @@ function TreeRow({
         aria-hidden
         onClick={(e) => {
           e.stopPropagation();
-          if (row.hasChildren) store.toggleExpanded(row.id);
+          if (row.hasChildren) store.toggleExpanded(row.headingKey ?? row.id);
         }}
         className="grid size-6 shrink-0 place-items-center"
         style={{ visibility: row.hasChildren ? 'visible' : 'hidden' }}
@@ -232,9 +249,18 @@ function TreeRow({
         </svg>
       </button>
 
-      <NodeGlyph kind={node.kind} />
+      {row.heading !== undefined ? (
+        <span
+          className="text-[11px] font-semibold tracking-wide uppercase"
+          style={{ color: 'var(--text-tertiary)' }}
+        >
+          {row.heading}
+        </span>
+      ) : null}
 
-      {node.kind === 'element' ? (
+      {row.heading === undefined && <NodeGlyph kind={node.kind} />}
+
+      {row.heading === undefined && node.kind === 'element' ? (
         <>
           {node.name.prefix !== '' && (
             <span
@@ -245,8 +271,14 @@ function TreeRow({
             </span>
           )}
           <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-            {node.name.localName}
+            {row.componentLabel ?? node.name.localName}
           </span>
+
+          {row.componentDetail !== undefined && row.componentDetail !== '' && (
+            <span className="shrink-0 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+              {row.componentDetail}
+            </span>
+          )}
 
           <SchemaBadge row={row} />
 
@@ -274,9 +306,23 @@ function TreeRow({
             </span>
           )}
 
+          {row.flow !== undefined && (
+            // The whole paragraph on one row. Marked-up runs show as ⟨…⟩ rather than being stripped,
+            // so it is never a surprise that half of it is tagged.
+            <span className="truncate" style={{ color: 'var(--text-secondary)' }}>
+              {row.flow}
+            </span>
+          )}
+
           {preview !== null && (
-            <span className="truncate italic" style={{ color: 'var(--text-tertiary)' }}>
-              = {preview}
+            // A generated value is marked wherever it appears, not only counted in the app bar.
+            // "Valid but meaningless" is only visible if the meaningless part is visible.
+            <span
+              className="truncate italic"
+              style={{ color: 'var(--text-tertiary)' }}
+              title={unreviewed ? 'A value the wizard invented — F7 steps through them' : undefined}
+            >
+              {unreviewed && '• '}= {preview}
             </span>
           )}
         </>

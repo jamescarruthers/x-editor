@@ -6,8 +6,18 @@ import {
   type NodeId,
   type ParseError,
 } from '@x-editor/xml-core';
-import type { ElementContext, SchemaDiagnostic } from '@x-editor/xsd';
+import { loadXPath, type ElementContext, type SchemaDiagnostic } from '@x-editor/xsd';
 import { SchemaStore } from './schema.js';
+import { ValidationClient } from './validation.js';
+import { SchematronStore } from './schematron.js';
+import { isSchemaDocument } from '../model/componentTree.js';
+import {
+  nextPlaceholder,
+  pendingPlaceholders,
+  resolvePlaceholders,
+  type Placeholder,
+  type Scaffold,
+} from '../model/scaffold.js';
 
 /**
  * The document lives outside React.
@@ -28,11 +38,39 @@ class EditorStore {
   fileName = 'untitled.xml';
   readonly schema = new SchemaStore();
   schemaProblems: readonly SchemaDiagnostic[] = [];
+  /** The second opinion, from libxml2 in a worker. See `validation.ts` for why it is separate. */
+  readonly verdict = new ValidationClient(() => this.emit());
+  /** Schematron mode: the schema being edited, and the sample document it is tried against. */
+  readonly schematron = new SchematronStore();
+
+  /**
+   * XSD mode shows the component view by default.
+   *
+   * A schema's source order is an accident of how it was written; its component structure is what
+   * the author thinks in. Both address the same nodes, so the toggle costs nothing to keep in step.
+   */
+  componentView = false;
+
+  /**
+   * The values the scaffolder invented, and what it invented them as.
+   *
+   * A generated document is valid and meaningless; this is what turns that into a to-do list. Held
+   * as the generated values rather than as a "needs review" flag, so whether one has been reviewed
+   * is answered by comparing against the document — which is exact, survives undo, and needs no
+   * hook in the edit path to keep in step.
+   */
+  placeholders: readonly Placeholder[] = [];
 
   constructor(source: string, fileName: string) {
     this.doc = XmlDocument.parse(source);
     this.fileName = fileName;
     this.expandInitial();
+  }
+
+  setComponentView(on: boolean): void {
+    if (this.componentView === on) return;
+    this.componentView = on;
+    this.emit();
   }
 
   private expandInitial(): void {
@@ -65,15 +103,55 @@ class EditorStore {
 
   load(source: string, fileName: string): void {
     this.doc = XmlDocument.parse(source);
+    this.verdict.request(this.doc);
+    this.schematron.refresh(this.doc);
     this.fileName = fileName;
     this.expanded = new Set();
     this.selected = ROOT_ID;
+    this.placeholders = [];
+    // A schema opens in the component view, an instance in the literal one.
+    this.componentView = isSchemaDocument(this.doc);
     this.expandInitial();
     this.emit();
   }
 
+  /**
+   * Load a document the wizard generated, keeping track of what it invented.
+   *
+   * Separate from `load` because the placeholder paths are only meaningful against the text that
+   * produced them — resolving them anywhere else would bind them to whatever happens to sit at
+   * those indices.
+   */
+  loadScaffold(scaffold: Scaffold, fileName: string): void {
+    this.load(scaffold.source, fileName);
+    this.placeholders = resolvePlaceholders(this.doc, scaffold.placeholders);
+    const first = this.pending[0];
+    if (first !== undefined) {
+      this.selected = first.node;
+      for (const ancestor of this.doc.ancestorsOf(first.node)) this.expanded.add(ancestor);
+    }
+    this.emit();
+  }
+
+  /** The generated values nobody has looked at yet. */
+  get pending(): readonly Placeholder[] {
+    return pendingPlaceholders(this.doc, this.placeholders);
+  }
+
+  /** Steps to the next unreviewed generated value. Bound to F7 / Shift+F7. */
+  stepPlaceholder(direction: 1 | -1): boolean {
+    const target = nextPlaceholder(this.doc, this.placeholders, this.selected, direction);
+    if (target === null) return false;
+    this.selected = target;
+    for (const ancestor of this.doc.ancestorsOf(target)) this.expanded.add(ancestor);
+    this.emit();
+    return true;
+  }
+
   run(command: Command): void {
     this.doc.run(command);
+    this.verdict.request(this.doc);
+    this.schematron.refresh(this.doc);
     this.selected = command.affected;
     // Reveal the affected node — an edit whose result is hidden inside a collapsed parent reads as
     // nothing having happened.
@@ -98,6 +176,8 @@ class EditorStore {
    * complaint about every editor in the prior art.
    */
   private focusAfterHistory(command: Command): void {
+    this.verdict.request(this.doc);
+    this.schematron.refresh(this.doc);
     const target = this.doc.node(command.affected) !== undefined ? command.affected : ROOT_ID;
     this.selected = target;
     for (const ancestor of this.doc.ancestorsOf(target)) this.expanded.add(ancestor);
@@ -146,14 +226,28 @@ class EditorStore {
 
   // --- schema ------------------------------------------------------------
 
-  attachSchema(fileName: string, source: string): void {
-    this.schemaProblems = this.schema.attach(fileName, source);
+  attachSchema(
+    fileName: string,
+    source: string,
+    supporting: Readonly<Record<string, string>> = {},
+  ): void {
+    this.schemaProblems = this.schema.attach(fileName, source, supporting);
+    this.verdict.setSchema(this.schema.sources(), fileName);
+    this.verdict.request(this.doc);
     this.emit();
+
+    // A 1.1 schema needs XPath to check its assertions. Fetching it here rather than at startup is
+    // why a 1.0 user never downloads it; re-emitting afterwards is what makes the assertions appear
+    // once it lands, instead of staying invisible until the next edit.
+    if (this.schema.needsXPath) {
+      void loadXPath().then(() => this.emit());
+    }
   }
 
   detachSchema(): void {
     this.schema.detach();
     this.schemaProblems = [];
+    this.verdict.setSchema([], '');
     this.emit();
   }
 
@@ -164,6 +258,11 @@ class EditorStore {
    * proportional to depth rather than document size — cheap enough that a cache would cost more in
    * staleness bugs than it saves.
    */
+  attachSample(source: string, name: string): void {
+    this.schematron.setSample(source, name);
+    this.emit();
+  }
+
   contextFor(id: NodeId): ElementContext | null {
     return this.schema.contextFor(this.doc, id);
   }

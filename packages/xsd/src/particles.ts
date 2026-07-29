@@ -69,6 +69,12 @@ export type Particle =
        */
       readonly kind: 'all';
       readonly items: readonly { readonly name: ElementName; readonly occurs: Occurs }[];
+      /** XSD 1.1 allows wildcards inside `xs:all`; under 1.0 this is always empty. */
+      readonly wildcards?: readonly {
+        readonly namespaceConstraint: NamespaceConstraint;
+        readonly processContents: ProcessContents;
+        readonly occurs: Occurs;
+      }[];
       readonly occurs: Occurs;
     };
 

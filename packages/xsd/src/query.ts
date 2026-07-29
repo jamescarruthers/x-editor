@@ -30,6 +30,7 @@ import {
   type SchemaModel,
 } from './model.js';
 import { sampleFor } from './xsdRegex.js';
+import { evaluateBoolean } from './xpath.js';
 import {
   cardinalityChip,
   describeElement,
@@ -93,6 +94,13 @@ export function elementContext(
     let type: CompiledType = declaration === null ? ANY_TYPE_DEF : model.typeOf(declaration);
     let typeOverridden = false;
 
+    // XSD 1.1 conditional type assignment, applied before `xsi:type`: the schema picks a type from
+    // the element's own attributes, and the instance may then still override it.
+    if (declaration !== null && declaration.alternatives.length > 0) {
+      const chosen = selectAlternative(model, document, id, declaration);
+      if (chosen !== null) type = chosen;
+    }
+
     // `xsi:type` substitutes a derived type at runtime. Real documents use it constantly — an
     // abstract head type with concrete subtypes is the standard XSD polymorphism idiom — and
     // ignoring it makes the palette offer the base type's children, which is simply wrong.
@@ -117,6 +125,43 @@ export function elementContext(
   }
 
   return context;
+}
+
+/**
+ * The type an `xs:alternative` chain selects, or null when none applies.
+ *
+ * First match wins, and a final alternative with no `test` is the fallback — the same
+ * first-match-wins rule Schematron uses for `sch:rule`, and the same one beginners trip over.
+ * A broken expression is skipped rather than treated as false: the schema author's mistake must not
+ * silently change which type the user's document is checked against.
+ */
+function selectAlternative(
+  model: SchemaModel,
+  document: XmlDocument,
+  id: NodeId,
+  declaration: CompiledElement,
+): CompiledType | null {
+  for (const alternative of declaration.alternatives) {
+    if (alternative.test !== null) {
+      const outcome = evaluateBoolean(document, id, alternative.test, {
+        namespaces: alternative.namespaces,
+        defaultNamespace: alternative.xpathDefaultNamespace,
+        isolate: id,
+      });
+      if (!outcome.ok || !outcome.value) continue;
+    }
+
+    if (alternative.inlineType !== null) {
+      return alternative.inlineType.form === 'simple'
+        ? model.simpleTypes.compile(alternative.inlineType)
+        : model.compileComplex(alternative.inlineType);
+    }
+    if (alternative.type !== null) return model.typeByName(alternative.type, alternative.origin);
+    // `<xs:alternative/>` with neither test nor type means "fall back to xs:error" in the spec;
+    // treating it as "no opinion" is friendlier and cannot make a valid document look invalid.
+    return null;
+  }
+  return null;
 }
 
 function xsiType(
@@ -178,7 +223,7 @@ export function insertCandidates(
 ): InsertCandidate[] {
   if (context.type.form !== 'complex') return [];
   const content = model.contentModel(context.type);
-  const childNames = context.children.map((child) => child.name);
+  const childNames = modelChildNames(context);
 
   const required = new Set(
     requiredMissing(model, context).map((name) => elementNameKey(name)),
@@ -367,6 +412,36 @@ function findOccurs(
   }
 }
 
+/**
+ * The children the declared content model has to account for.
+ *
+ * With XSD 1.1 open content, elements the open wildcard admits are *not* the content model's
+ * business — that is what "open" means. Filtering them out here rather than teaching the automaton
+ * about interleaving keeps the automaton exactly as it was: interleaving a model with a wildcard
+ * loop is an explosion in states for semantics that are this one line.
+ */
+export function modelChildNames(context: ElementContext): ElementName[] {
+  const names = context.children.map((child) => child.name);
+  if (context.type.form !== 'complex') return names;
+
+  const open = context.type.openContent;
+  if (open === null) return names;
+
+  if (open.mode === 'interleave') {
+    return names.filter(
+      (name) => !namespaceMatches(open.wildcard.namespaceConstraint, name.namespaceUri),
+    );
+  }
+
+  // Suffix mode: the wildcard only applies after the declared content, so trailing matches are
+  // dropped and anything earlier still has to fit the model.
+  let end = names.length;
+  while (end > 0 && namespaceMatches(open.wildcard.namespaceConstraint, names[end - 1]!.namespaceUri)) {
+    end--;
+  }
+  return names.slice(0, end);
+}
+
 // --- required and missing -----------------------------------------------
 
 /**
@@ -378,7 +453,7 @@ function findOccurs(
 export function requiredMissing(model: SchemaModel, context: ElementContext): ElementName[] {
   if (context.type.form !== 'complex') return [];
   const content = model.contentModel(context.type);
-  const childNames = context.children.map((child) => child.name);
+  const childNames = modelChildNames(context);
 
   switch (content.kind) {
     case 'all':
@@ -394,7 +469,7 @@ export function requiredMissing(model: SchemaModel, context: ElementContext): El
 export function firstProblemIndex(model: SchemaModel, context: ElementContext): number | null {
   if (context.type.form !== 'complex') return null;
   const content = model.contentModel(context.type);
-  const childNames = context.children.map((child) => child.name);
+  const childNames = modelChildNames(context);
 
   switch (content.kind) {
     case 'all':
@@ -483,9 +558,23 @@ export function validateText(context: ElementContext, text: string): ValueProble
 
 export interface SkeletonNode {
   readonly name: ElementName;
-  readonly attributes: readonly { name: XsdQName; value: string }[];
+  readonly attributes: readonly SkeletonAttribute[];
   readonly children: readonly SkeletonNode[];
   readonly text: string | null;
+  /**
+   * True when `text` was invented to satisfy the type rather than taken from `fixed` or `default`.
+   *
+   * The distinction matters downstream: a generated value is *valid and meaningless*, and turning it
+   * into a reviewable to-do list is what stops a wizard handing someone a document full of
+   * `2026-01-01` they never notice. A `fixed` value is neither generated nor reviewable.
+   */
+  readonly textPlaceholder: boolean;
+}
+
+export interface SkeletonAttribute {
+  readonly name: XsdQName;
+  readonly value: string;
+  readonly placeholder: boolean;
 }
 
 export interface SkeletonOptions {
@@ -519,22 +608,27 @@ function build(
   stack: Set<string>,
 ): SkeletonNode {
   const type = model.typeOf(element);
-  const attributes: { name: XsdQName; value: string }[] = [];
+  const attributes: SkeletonAttribute[] = [];
   const children: SkeletonNode[] = [];
   let text: string | null = null;
+  let textPlaceholder = false;
 
   if (type.form === 'complex') {
     for (const use of type.attributes) {
       if (use.use !== 'required' && include === 'required') continue;
       if (use.use === 'prohibited') continue;
+      const authored = use.fixedValue ?? use.defaultValue;
       attributes.push({
         name: use.name,
-        value: use.fixedValue ?? use.defaultValue ?? placeholderFor(use.type),
+        value: authored ?? placeholderFor(use.type),
+        placeholder: authored === null,
       });
     }
 
     if (type.contentKind === 'simple' && type.simpleType !== null) {
-      text = element.fixedValue ?? element.defaultValue ?? placeholderFor(type.simpleType);
+      const authored = element.fixedValue ?? element.defaultValue;
+      text = authored ?? placeholderFor(type.simpleType);
+      textPlaceholder = authored === null;
     } else if (depth > 0) {
       const key = qnameKey(element.name);
       // A recursive type would otherwise expand until the depth budget ran out, producing a
@@ -546,10 +640,12 @@ function build(
       }
     }
   } else {
-    text = element.fixedValue ?? element.defaultValue ?? placeholderFor(type);
+    const authored = element.fixedValue ?? element.defaultValue;
+    text = authored ?? placeholderFor(type);
+    textPlaceholder = authored === null;
   }
 
-  return { name: element.name, attributes, children, text };
+  return { name: element.name, attributes, children, text, textPlaceholder };
 }
 
 function skeletonChildren(

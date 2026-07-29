@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@x-editor/xml-core": "workspace:*"
+    "@x-editor/xml-core": "workspace:*",
+    "fontoxpath": "^3.34.0"
   },
   "devDependencies": {
     "libxml2-wasm": "0.7.1"

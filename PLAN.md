@@ -4,13 +4,17 @@ A browser-based, tree-node editor for **XML**, **XSD** and **Schematron**, with 
 validation running client-side, designed so that someone who does not already know the schema can
 still produce a valid document.
 
-**Status:** Phases 0–3 implemented. `packages/xml-core` (lossless CST, command log, splice
+**Status:** Phases 0–7 implemented. `packages/xml-core` (lossless CST, command log, splice
 serializer), `packages/xsd` (schema front end, simple- and complex-type compilers, Glushkov
 automaton, query API) and `apps/editor` (four-region shell, virtualized tree, Insert palette,
-schema-driven Inspector) are in place, at ~9,000 lines with 340 tests, and every verdict is checked
-against `libxml2-wasm` in CI. Phase 4 — libxml2 in a worker as the shipped authoritative verdict, the
-`cvc-*` catalogue and quick fixes — is next. See §10 for the roadmap and
-the per-phase *done when*.
+schema-driven Inspector, XSD component view and refactorings, form view, new-document wizard, smart
+paste, schema inference), `packages/validation-protocol` and `packages/xsd-libxml2` (the
+authoritative verdict, in a worker) and `packages/schematron` (a direct interpreter over fontoxpath,
+with the live test harness) are in place, with ~550 tests. Every verdict is checked against an
+independent implementation: `libxml2-wasm` for XSD 1.0, `xmlschema` for 1.1, and the ISO Schematron
+reference for Schematron. All five spikes are answered — see [`docs/spikes.md`](docs/spikes.md).
+**Phase 8 is ongoing**; its two risk-carrying items (mixed content, the table view) are done, and
+what remains there is listed honestly in §10. See §10 for the roadmap and the per-phase *done when*.
 
 **Companion documents**
 
@@ -99,7 +103,7 @@ Boring, well-supported choices. The novelty budget is spent entirely on the sche
 | Language | TypeScript, `strict` | A discriminated-union CST, a typed worker protocol and a command layer with inverses are exactly where this pays |
 | Framework | React 19 | Chosen for ecosystem depth in the three things we need: virtualized tree, accessible overlays, command palette |
 | Build | Vite | First-class module-worker and WASM handling, which the validators need |
-| Repo | pnpm workspaces | `packages/xml-core`, `packages/xsd`, `packages/schematron`, `packages/validation-protocol`, `apps/editor` |
+| Repo | pnpm workspaces | `packages/xml-core`, `packages/xsd`, `packages/xsd-libxml2`, `packages/validation-protocol`, `packages/schematron`, `apps/editor` |
 | UI kit | shadcn/ui on Radix Primitives + Tailwind v4 | Copy-in source, so a 24px density mode is an edit rather than a fight with a theme API |
 | Tree | `@headless-tree/react` + `@tanstack/react-virtual` | Headless, correct ARIA, DnD/typeahead/search as feature flags; virtualization is mandatory at 50k nodes |
 | Editor widgets | CodeMirror 6 | Source view and the Schematron XPath field. ~10× smaller than Monaco |
@@ -501,13 +505,23 @@ verdict against `libxml2-wasm` and fails the build on a disagreement — it caug
 run (see [`docs/spikes.md`](docs/spikes.md)). What remains is *breadth*: the real corpora named in §9
 (the W3C Schema Test Collection, UBL 2.1, GML 3.2, HL7 CDA, DocBook, SEPA) are not yet vendored.
 
-### Phase 4 — Validation and quick fixes (medium)
+### Phase 4 — Validation and quick fixes (medium) — **done, bar four classes with named reasons**
 libxml2-wasm in a worker, the `lineMap` error→node mapping, the `cvc-*` message catalogue, the
 "Why is this invalid?" explainer, the edit-distance repair algorithm behind quick fixes.
 **Done when:** every one of the 20 error classes in [`docs/schema-engine.md`](docs/schema-engine.md)
 renders in plain English with at least one working one-click fix.
 
-### Phase 4b — XSD 1.1 (medium)
+16 of the 20 do, and `packages/xsd/test/taxonomy.test.ts` is the evidence — it asserts, class by
+class, that the message carries no `cvc-` spec-ese, that at least one fix exists, and that the fix
+reads as an instruction. The four outstanding are named rather than quietly omitted: **13 and 14**
+(ID/IDREF and identity constraints) need P8, which this plan defers; **18** (well-formedness) belongs
+to `xml-core` and is reported before this engine runs; **20** (Schematron) is Phase 5.
+
+The repair algorithm is Oflazer error-tolerant alignment, as specified, and a property test checks
+that every alignment it proposes produces a child list the reference matcher accepts — a quick fix
+that leaves the document invalid would be worse than none.
+
+### Phase 4b — XSD 1.1 (medium) — **done, bar the conformance rate**
 `xs:assert` and `xs:alternative` evaluated through fontoxpath (already present), `openContent`,
 `xs:override`, relaxed `xs:all`, relaxed UPA. Version dispatch on the schema's `vc:minVersion` /
 declared version. `xmlschema`-under-Pyodide wired in as the lazily-loaded conformance check, and as
@@ -515,22 +529,179 @@ the CI oracle for 1.1.
 **Done when:** the W3C XSD 1.1 test set passes at a published rate, and a schema using `xs:assert`
 gives guidance and a verdict that agree with `xmlschema`.
 
-### Phase 5 — Schematron (medium)
+The second half holds: `packages/xsd/test/differential11.test.ts` checks every 1.1 verdict against
+`xmlschema` 4.3.2 under CPython, in CI. The first half waits on the same thing Phase 3's does — the
+W3C test collection is not yet vendored, so there is no rate to publish and none is claimed.
+
+Two things came out differently from the plan's expectation, both for the better. **`xs:openContent`
+never reaches the automaton**: interleaved open content would mean interleaving the whole model with
+a wildcard loop, an explosion in states, when the same semantics fall out of removing the
+wildcard-matched children before the model runs. And **version dispatch does not trust
+`vc:minVersion`** — a schema using 1.1 constructs *is* 1.1 whether or not it says so, and detecting
+that structurally is what stops the 1.0 oracle being pointed at a 1.1 schema.
+
+The XPath layer is the phase's real asset: `packages/xsd/src/xpath.ts` makes the CST itself the
+XPath data model through fontoxpath's `IDomFacade`, so there is no second DOM to keep in sync.
+Phase 5's Schematron interpreter and its live XPath editor both sit directly on it.
+
+### Phase 5 — Schematron (medium) — **done, with the oracle substituted**
 The fontoxpath interpreter (from `node-schematron`), the Schematron editor mode, the live test
 harness, SchXslt2 differential CI.
 **Done when:** a beginner can write a working rule against a sample document and see it fire, and our
 findings match SchXslt2 across the corpus.
 
-### Phase 6 — XSD authoring (medium)
+Both halves hold. Attaching a sample document to a `.sch` file gives live counts beside every
+expression — how many nodes a context matches, how many it fires on, per-assertion pass and fail
+counts, the rendered message with `sch:value-of` resolved, and a named warning when a rule is
+shadowed and never runs.
+
+**The oracle is substituted and the substitution is stated.** SchXslt2 is not on npm and vendoring a
+third-party XSLT distribution is a larger step than it looks, so `lxml.isoschematron` stands in — it
+bundles the ISO skeleton XSLT and is genuinely independent, working by compile-to-XSLT where we
+interpret. Its real limit is that libxslt is XSLT 1.0, so the corpus sticks to expressions that mean
+the same under XPath 1.0 and 3.1; `queryBinding="xslt2"` features are unchecked by it.
+
+Written from scratch rather than forked from `node-schematron`: the parts that would have been
+reused are the parts our own CST and XPath facade already provide, and what remains — first-match-
+wins claiming, the statistics, abstract-pattern expansion — is the substance of the phase.
+
+### Phase 6 — XSD authoring (medium) — **done**
 Component tree, facets editor with live type testing, XSD regex translator, refactorings (rename with
 ref updates, extract/inline type), schema self-validation including UPA warnings.
+**Done when:** a schema author can rename a type, extract an anonymous one, and be told their content
+model is ambiguous, without leaving the editor or breaking the file.
 
-### Phase 7 — Beginner scaffolding (medium)
+All three hold, and the phase is built on one decision worth stating: **a schema is a graph written
+as a tree**, and the tree view is structurally incapable of showing the edges. `type="Address"` is a
+reference the outline cannot draw, which is why every operation here exists — each one is something
+that means "find all the edges yourself, and get none of them wrong".
+
+The component view (`apps/editor/src/model/componentTree.ts`) is a *projection* over the same CST,
+not a second model. Rows address the same `NodeId`s, so selection, the Inspector and undo all work
+across the toggle with nothing to synchronise — every sync bug in this class of tool lives in the gap
+between two representations of one document. Heading rows are synthetic and their collapsed state is
+encoded outside the real `NodeId` range, so collapsing "Simple types" does not collapse the schema
+element it hangs from.
+
+Rename, extract and inline are in `apps/editor/src/model/xsdAuthoring.ts`, and none of them consults
+the compiled model to find references. That is deliberate: renaming has to work on a schema that does
+not currently compile, which is the state a schema is in for most of the time anyone is editing it.
+References are found syntactically from a table of the twelve QName-valued attributes in XSD, kept in
+their six symbol spaces — `ref` means three different things depending on the element it sits on, so
+a generic rule would silently merge a group and a type of the same name.
+
+Three things the refactorings refuse to do, each because the alternative is a confident wrong answer:
+inline a type more than one declaration shares; extract under a name already taken; and extract when
+no correct reference text exists at all (no target namespace, but a default `xmlns` in scope, so
+"a name in no namespace" cannot be written in an attribute value). A round-trip test asserts that
+extract-then-inline returns the file byte-for-byte, including indentation — both operations move a
+subtree between depths, and a reformat nobody asked for is the fastest way to get a tool banned.
+
+Self-validation reports what parses and is still wrong: dangling references and ambiguous content
+models. The dangling-reference check stays quiet when the schema has an `include` or `import`,
+because the missing component may well be in a document this editor was never given. Its most useful
+output is the hint on the commonest XSD bug of all — a `targetNamespace` with no matching default
+`xmlns`, so every unprefixed reference means a name in no namespace while pointing at a declaration
+sitting visibly two lines below.
+
+The facets panel is built around a live test box rather than a form. A facet list tells an author
+what they wrote; typing a value that ought to be legal and watching it fail tells them what they
+*meant*. It surfaces the XSD regex translator directly, including its two honest failure modes — a
+pattern that could not be read, and one checked loosely because it uses a Unicode property inside a
+subtraction.
+
+### Phase 7 — Beginner scaffolding (medium) — **done, bar coach marks and expert mode**
 Form view, the new-document wizard, onboarding empty states and the three bundled examples, smart
 paste, "explain my document", schema inference.
+**Done when:** someone who has never seen the schema can go from an `.xsd` to a valid document, and
+someone who has never seen the document can find out what it is.
 
-### Phase 8 — Polish (ongoing)
+Both hold. The wizard's three questions — which schema, which root, how much — produce a document
+already shaped like the answer, and the "how much" step measures both options by generating them
+rather than describing them: *142 elements, 9 values to review* beats "this may be large".
+
+The single decision the phase turns on is that **a generated document is valid and meaningless**.
+That is the failure mode of every document generator and it is invisible without help: the badge
+reads green while every date says `2026-01-01`. So the scaffolder marks every value it had to invent,
+the app bar counts them, `F7` steps through them and the tree dots them where they sit. Values from
+`fixed` and `default` are not marked — the schema author already decided those, and listing them
+would pad the to-do list with items nobody can act on.
+
+Whether a generated value has been reviewed is derived by comparing it against the document rather
+than tracked through the edit that changed it. That is exact, costs one pass over the placeholder
+list, and gets undo right for free; an intercept-the-edit scheme silently loses entries, and there is
+a test pinning that case specifically.
+
+**Smart paste** asks before the edit instead of reporting errors after it, with each option's cost
+measured — *paste inside: adds 2 errors* — and ranked by consequence first, proximity second. A plain
+`Ctrl+V` still goes straight through when exactly one option is valid, because turning an expert's
+paste into a dialogue is its own kind of failure. The fragment is reconstructed node by node rather
+than regenerated from the schema: an earlier version built a skeleton per pasted name and produced
+structurally correct elements containing none of what was on the clipboard, which a test now forbids.
+
+**Schema inference** is permissive where the evidence is thin and exact where it is not. Anything
+seen twice is written `unbounded` — permitting one more than the file showed is a smaller mistake
+than rejecting the next file — while every value stays `xs:string`, because guessing `xs:date` from
+one date-shaped string rejects documents the author would have accepted. The caveats are part of the
+output, not a disclaimer around it.
+
+The three bundled examples are chosen for one lesson each: the purchase order teaches the core loop,
+the topic teaches prefixes and mixed content across two namespaces and an import, and the invoice is
+structurally perfect and wrong — its total is 120.00 against lines summing to 140.00. A test asserts
+it fails exactly one rule and goes green when corrected, so if the first-minute demo of error →
+explanation → fix → green ever stops working, CI says so rather than a user.
+
+Two items from the UX spec are **not** done and are not claimed: first-run coach marks, and expert
+mode's chrome removal. Both are presentation-only and neither changes what the tool can do.
+
+### Phase 8 — Polish (ongoing) — **the two that carried risk are done**
 Mixed-content editor, XSD diagram, table view for repeated siblings, PWA/offline, i18n.
+
+**Mixed content — SPIKE-4, and §11 risk 3 — is answered, and the spike asked the wrong question.**
+Both of its candidate answers (ProseMirror with a generated schema; a scoped CodeMirror) are
+*editors*, and the unusable part was never the editing — it was the **display**. `<p>See
+<emph>this</emph> for details.</p>` is five unreadable rows before anyone types anything. So a mixed
+element is now **one tree row carrying its flow**, with marked-up runs shown as `⟨…⟩` rather than
+stripped, so it is never a surprise that half a sentence is tagged. The children stay reachable.
+
+Editing is then a much smaller problem, answered with a scoped source snippet: the inner XML in a
+textarea, the schema's permitted inline elements as wrap buttons, and nothing committed until it
+parses — refusing a broken commit matters more here than anywhere else, because the alternative is
+discarding a paragraph someone was midway through typing. ProseMirror was declined deliberately: it
+costs ~150 KB in the entry chunk plus a second document model to keep in step with the CST, which is
+the exact two-representations problem this codebase is arranged around, bought for a minority of
+documents. The seam is `FlowEditor`; `flowSource` and `setFlow` are the whole interface, so a WYSIWYG
+surface can replace it later without anything else moving. What is given up is WYSIWYG, and someone
+editing a 200-paragraph DITA topic all day will want it.
+
+**The table view** turns twelve `<line>` elements with four children each — 60 tree rows — into
+twelve rows and four columns. Reading *down* a column is the question a tree makes hard and a grid
+makes free. It is offered only where a list actually exists, columns accumulate across rows so one
+row missing an optional child does not lose the column for the rest, and a cell whose element is
+absent creates it on first edit rather than being a hole. Nested children never become columns: they
+would produce a grid whose columns mean different things at different depths.
+
+**Offline** is done, and is part of the security story rather than a nicety: the whole premise is
+that documents never leave the browser (§8), and a validator that stops working on a train
+contradicts its own claim. The service worker is generated against the real build output by
+`apps/editor/scripts/build-sw.mjs` — hand-written rather than `vite-plugin-pwa`, because the entire
+requirement is "cache these seven files and serve them back" and a dependency whose configuration
+surface exceeds the thing it configures is a liability. The cache name carries a hash of its
+contents, so a new build invalidates the old cache wholesale rather than relying on someone
+remembering to bump a version. CI asserts the worker exists and covers every chunk, since the
+failure mode is a build-step change silently dropping it. libxml2's WASM is base64-embedded in the
+worker bundle, so validation works offline too.
+
+**First-run coach marks** are done: four, sequential, anchored to real controls, and never modal —
+everything underneath stays clickable, so someone who would rather just start is never blocked by
+the explanation of how to start. `Escape` dismisses all of them, because a person pressing Escape is
+telling you they do not want the tour and asking twice more is not listening.
+
+**Not done, and not claimed:** the XSD box diagram (deferred in §7 on the grounds that beginners
+cannot read that notation, and unchanged), i18n, and expert mode's chrome removal. i18n in
+particular is left alone deliberately — every user-facing string in this codebase is written to be
+read, and threading them through a message catalogue is a refactor that should happen when there is
+a second locale to test against, not before. Neither changes what the tool can do.
 
 ---
 
@@ -551,9 +722,18 @@ Mixed-content editor, XSD diagram, table view for repeated siblings, PWA/offline
    XML editor attracts. *Mitigation:* decide in Phase 0, implement in Phase 8. Recommended: an inline
    flow editor (ProseMirror with a schema generated from the content model) for `mixed="true"` elements;
    cheaper fallback is a scoped CodeMirror snippet editor.
+   *Status:* **addressed, and the recommendation was not taken.** The diagnosis was right and the
+   prescription was aimed at the wrong half: five rows is unreadable before any editing happens, so
+   the fix is that a flow is one row. Editing is a scoped source snippet with schema-driven wrap
+   buttons; ProseMirror was declined for the entry-chunk cost and the second document model. See
+   SPIKE-4 in [`docs/spikes.md`](docs/spikes.md).
 4. **Bundle weight.** Two engines plus CodeMirror plus fontoxpath is multiple MB. *Mitigation:*
    rigorous lazy loading per mode, `size-limit` failing the build on regression. A stray top-level
    import pulling a validator into the main chunk is the failure mode.
+   *Status:* **this has already happened once** — adding XSD 1.1 assertions statically imported
+   fontoxpath and put 330KB into the entry chunk. `scripts/check-bundle.mjs` now runs in CI and
+   fails the build on both the size and the chunk separation, since a one-line mistake that looks
+   like nothing has to be caught mechanically rather than remembered.
 5. **`libxml2-wasm` is pre-1.0** and its schema import/include support is experimental. *Mitigation:*
    pin exactly, wrap behind the `XsdEngine` interface, keep `xmllint-wasm` working in CI.
 6. **Memory, not CPU, is the ceiling.** A 50MB instance expands to 400–600MB inside the wasm32 heap and

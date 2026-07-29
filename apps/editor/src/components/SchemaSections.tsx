@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   attributeStatuses,
   describeAttribute,
@@ -6,6 +7,7 @@ import {
   insertionPlan,
   requiredMissing,
   textTypeOf,
+  validateDocument,
   validateText,
   widgetFor,
   type AttributeStatus,
@@ -15,6 +17,7 @@ import {
 } from '@x-editor/xsd';
 import { setAttribute, setTextValue, type NodeId, type QName } from '@x-editor/xml-core';
 import { store, useEditor } from '../state/store.js';
+import { applyFix } from '../model/fixes.js';
 
 /**
  * The schema-aware half of the Inspector.
@@ -151,7 +154,7 @@ function AttributeRow({
  * A closed enumeration renders as radios or a select rather than a text box the user can get wrong,
  * which is the single highest-value thing the schema can do for someone typing a value.
  */
-function WidgetInput({
+export function WidgetInput({
   widget,
   value,
   onCommit,
@@ -364,6 +367,95 @@ export function AllowedHere({
   );
 }
 
+/**
+ * "Why is this invalid?" — everything wrong with the selected node, and what to do about it.
+ *
+ * Placed last in the Inspector on purpose. A beginner's questions arrive in order — what is this,
+ * what can it hold, what is wrong with it — and answering the third above the first reads as an
+ * expert tool. It is also the only section that is empty most of the time, so it stays out of the
+ * way until it has something to say.
+ */
+export function ProblemsWithThisNode({
+  context,
+  model,
+}: {
+  context: ElementContext;
+  model: SchemaModel;
+}): React.JSX.Element {
+  useEditor();
+  const diagnostics = useMemo(
+    () =>
+      validateDocument(model, store.document).filter(
+        (diagnostic) => diagnostic.node === context.nodeId,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.getSnapshot(), context.nodeId, model],
+  );
+
+  const verdict = store.verdict.state;
+  const engineFindings = verdict.findings.filter((finding) => finding.node === context.nodeId);
+
+  if (diagnostics.length === 0 && engineFindings.length === 0) {
+    return (
+      <Section title="Problems with this node">
+        <p style={{ color: 'var(--text-tertiary)' }}>Nothing wrong here.</p>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title={`Problems with this node (${diagnostics.length + engineFindings.length})`}>
+      <div className="flex flex-col gap-2.5">
+        {diagnostics.map((diagnostic, index) => (
+          <div key={`${diagnostic.code}-${index}`}>
+            <p style={{ color: 'var(--text-secondary)' }}>{diagnostic.message}</p>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {diagnostic.fixes.map((fix) => (
+                <button
+                  key={fix.title}
+                  type="button"
+                  onClick={() => applyFix(fix.edit)}
+                  title={fix.preview === undefined ? undefined : `Result: ${fix.preview}`}
+                  className="rounded border px-1.5 py-0.5 text-[11px]"
+                  style={{
+                    borderColor: 'var(--border-default)',
+                    background: 'var(--surface-0)',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  {fix.title}
+                  {fix.speculative === true && (
+                    <span
+                      className="ml-1"
+                      style={{ color: 'var(--text-tertiary)' }}
+                      title="A guess — check the result"
+                    >
+                      ?
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {engineFindings.length > 0 && (
+          <div style={{ opacity: verdict.stale ? 0.55 : 1 }}>
+            <div className="text-[10px] uppercase" style={{ color: 'var(--text-tertiary)' }}>
+              libxml2 says
+            </div>
+            {engineFindings.map((finding, index) => (
+              <p key={index} className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                {finding.message}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
 // --- shared bits --------------------------------------------------------
 
 function Section({
@@ -412,7 +504,7 @@ function rich(text: string): React.ReactNode {
   );
 }
 
-function CommitInput({
+export function CommitInput({
   value,
   onCommit,
   placeholder,

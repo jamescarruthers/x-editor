@@ -43,7 +43,7 @@ export function isAllParticle(particle: Particle): particle is Extract<Particle,
 }
 
 export function compileAll(particle: Extract<Particle, { kind: 'all' }>): AllContentModel {
-  return { members: particle.items, wildcards: [], occurs: particle.occurs };
+  return { members: particle.items, wildcards: particle.wildcards ?? [], occurs: particle.occurs };
 }
 
 function counts(children: readonly ElementName[]): Map<string, number> {

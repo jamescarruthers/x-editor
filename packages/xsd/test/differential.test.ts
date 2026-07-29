@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { XmlDocument } from '@x-editor/xml-core';
 import { assembleSchema, catalogueFrom } from '../src/assemble.js';
 import { SchemaModel } from '../src/model.js';
-import { validateDocument } from '../src/validate.js';
+import { validateDocument } from '../src/diagnostics.js';
 import { validateWithLibxml2 } from './oracles/libxml2.js';
 
 /**

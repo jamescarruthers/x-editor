@@ -22,25 +22,49 @@ export class SchemaStore {
   /** File name of the schema the user attached, for the toolbar. */
   name: string | null = null;
 
-  private sources: Record<string, string> = {};
+  private catalogue: Record<string, string> = {};
 
-  attach(fileName: string, source: string): SchemaDiagnostic[] {
-    this.sources = { ...this.sources, [fileName]: source };
+  /**
+   * @param supporting Documents the schema's own `include`/`import` will reach for, added in the
+   * same step. Attaching them afterwards would compile the schema once with them missing, which
+   * shows the user a burst of errors that resolve themselves a moment later.
+   */
+  attach(
+    fileName: string,
+    source: string,
+    supporting: Readonly<Record<string, string>> = {},
+  ): SchemaDiagnostic[] {
+    this.catalogue = { ...this.catalogue, ...supporting, [fileName]: source };
     this.name = fileName;
-    this.model = new SchemaModel(assembleSchema(fileName, catalogueFrom(this.sources)));
+    const set = assembleSchema(fileName, catalogueFrom(this.catalogue));
+    this.model = new SchemaModel(set);
+    this.needsXPath = set.declaredVersion === '1.1';
     return this.model.allDiagnostics();
   }
 
+  /**
+   * True when the schema uses XSD 1.1 constructs, which are the only thing that needs XPath.
+   *
+   * The engine is ~330KB and most schemas are 1.0, so it is fetched on demand rather than shipped
+   * to everyone — the lazy-loading discipline PLAN.md §11 risk 4 asks for.
+   */
+  needsXPath = false;
+
   /** Adds a supporting document — one an `include` or `import` referenced — without re-rooting. */
   addSupporting(fileName: string, source: string): void {
-    this.sources = { ...this.sources, [fileName]: source };
-    if (this.name !== null) this.attach(this.name, this.sources[this.name]!);
+    this.catalogue = { ...this.catalogue, [fileName]: source };
+    if (this.name !== null) this.attach(this.name, this.catalogue[this.name]!);
+  }
+
+  /** The catalogue, for the worker. Buffers only — the worker resolves nothing itself. */
+  sources(): { uri: string; text: string }[] {
+    return Object.entries(this.catalogue).map(([uri, text]) => ({ uri, text }));
   }
 
   detach(): void {
     this.model = null;
     this.name = null;
-    this.sources = {};
+    this.catalogue = {};
   }
 
   contextFor(document: XmlDocument, id: NodeId): ElementContext | null {

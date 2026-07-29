@@ -425,6 +425,51 @@ export function setTextValue(doc: XmlDocument, id: NodeId, value: string): Comma
   };
 }
 
+/**
+ * Add or change a namespace declaration on an element.
+ *
+ * Separate from `setAttribute` because the CST holds declarations apart from ordinary attributes —
+ * they are not settings on the element, they change how every name beneath it resolves. Routing
+ * them through the attribute list would produce a document that serialises correctly and resolves
+ * wrongly.
+ */
+export function setNamespaceDeclaration(
+  doc: XmlDocument,
+  id: NodeId,
+  prefix: string,
+  uri: string,
+): Command {
+  const node = doc.expect(id);
+  if (node.kind !== 'element') throw new Error('Only elements carry namespace declarations');
+  const before = [...node.namespaceDeclarations];
+  const existing = before.findIndex((declaration) => declaration.prefix === prefix);
+  const after = [...before];
+  if (existing >= 0) after[existing] = { prefix, uri };
+  else after.push({ prefix, uri });
+
+  const label =
+    prefix === ''
+      ? `Set the default namespace to ${uri}`
+      : `Declared xmlns:${prefix}="${uri}"`;
+
+  return {
+    label,
+    affected: id,
+    apply: (d) => {
+      const target = d.expect(id);
+      if (target.kind !== 'element') return;
+      target.namespaceDeclarations = [...after];
+      d.markDirty(id);
+    },
+    invert: (d) => {
+      const target = d.expect(id);
+      if (target.kind !== 'element') return;
+      target.namespaceDeclarations = [...before];
+      d.markDirty(id);
+    },
+  };
+}
+
 export function renameElement(doc: XmlDocument, id: NodeId, name: QName): Command {
   const node = doc.expect(id);
   if (node.kind !== 'element') throw new Error(`Node ${id} is not an element`);

@@ -29,6 +29,7 @@ import {
   type RawFacet,
   type RawParticle,
   type RawType,
+  type RawTypeAlternative,
   type SchemaDiagnostic,
   type XsdQName,
 } from './ast.js';
@@ -82,8 +83,15 @@ export interface CompiledComplexType {
   readonly final: DerivationSet;
   /** XSD 1.1 assertions, carried through for Phase 4b rather than evaluated. */
   readonly assertions: readonly RawAssertion[];
+  /** XSD 1.1 `xs:openContent`. Null when the type is closed, which is the 1.0 behaviour. */
+  readonly openContent: OpenContent | null;
   readonly documentation: string;
   readonly origin: Origin;
+}
+
+export interface OpenContent {
+  readonly mode: 'interleave' | 'suffix';
+  readonly wildcard: Wildcard;
 }
 
 export type CompiledType = CompiledSimpleType | CompiledComplexType;
@@ -103,6 +111,8 @@ export interface CompiledElement {
   /** Resolved through `SchemaModel.typeOf`, so a recursive schema does not loop while compiling. */
   readonly typeName: XsdQName | null;
   readonly inlineType: RawType | null;
+  /** XSD 1.1 conditional type assignment; empty under 1.0. */
+  readonly alternatives: readonly RawTypeAlternative[];
 }
 
 /**
@@ -191,6 +201,7 @@ export class SchemaModel {
       origin: raw.origin,
       typeName: raw.type,
       inlineType: raw.inlineType,
+      alternatives: raw.alternatives,
     };
   }
 
@@ -336,6 +347,7 @@ export class SchemaModel {
       block: raw.block ?? document?.schema.blockDefault ?? EMPTY_DERIVATION_SET,
       final: raw.final ?? document?.schema.finalDefault ?? EMPTY_DERIVATION_SET,
       assertions: raw.assertions,
+      openContent: this.openContentOf(raw),
       documentation: raw.annotation?.documentation ?? '',
       origin: raw.origin,
     };
@@ -417,6 +429,26 @@ export class SchemaModel {
         };
       }
     }
+  }
+
+  /**
+   * XSD 1.1 open content: a wildcard that applies *alongside* the declared content model.
+   *
+   * Modelled beside the particle rather than folded into it. Interleaved open content means the
+   * wildcard may appear between any two children, which as an automaton construction means
+   * interleaving the whole model with a loop — an explosion for no benefit, when the same semantics
+   * fall out of removing the matched children before the model runs.
+   */
+  private openContentOf(raw: RawComplexType): OpenContent | null {
+    const open = raw.openContent;
+    if (open === null || open.mode === 'none' || open.wildcard === null) return null;
+    return {
+      mode: open.mode,
+      wildcard: {
+        namespaceConstraint: this.namespaceConstraint(open.wildcard.namespace, open.wildcard.origin),
+        processContents: open.wildcard.processContents,
+      },
+    };
   }
 
   private restrictSimpleContent(
@@ -637,12 +669,28 @@ export class SchemaModel {
       }
 
       case 'all': {
+        // XSD 1.0 restricts `xs:all` to elements with maxOccurs <= 1. 1.1 relaxes both, allowing
+        // repeated members and wildcards, so both are carried rather than discarded.
         const items: { name: ElementName; occurs: Occurs }[] = [];
+        const wildcards: {
+          namespaceConstraint: NamespaceConstraint;
+          processContents: ProcessContents;
+          occurs: Occurs;
+        }[] = [];
+
         for (const item of raw.items) {
           const compiled = this.toParticle(item, origin, seenGroups, locals);
-          if (compiled?.kind === 'element') items.push({ name: compiled.name, occurs: compiled.occurs });
+          if (compiled?.kind === 'element') {
+            items.push({ name: compiled.name, occurs: compiled.occurs });
+          } else if (compiled?.kind === 'wildcard') {
+            wildcards.push({
+              namespaceConstraint: compiled.namespaceConstraint,
+              processContents: compiled.processContents,
+              occurs: compiled.occurs,
+            });
+          }
         }
-        return { kind: 'all', items, occurs: raw.occurs };
+        return { kind: 'all', items, wildcards, occurs: raw.occurs };
       }
 
       case 'any':
@@ -729,6 +777,7 @@ export const ANY_TYPE_DEF: CompiledComplexType = {
   block: EMPTY_DERIVATION_SET,
   final: EMPTY_DERIVATION_SET,
   assertions: [],
+  openContent: null,
   documentation: 'anything',
   origin: { documentUri: '', node: 0 as never },
 };

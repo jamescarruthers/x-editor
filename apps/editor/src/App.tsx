@@ -3,13 +3,20 @@ import { insertElement, removeNode, ROOT_ID } from '@x-editor/xml-core';
 import { store, useEditor } from './state/store.js';
 import { Tree } from './components/Tree.js';
 import { Inspector } from './components/Inspector.js';
-import { HistoryPanel, ProblemsPanel, SourcePanel } from './components/Panels.js';
+import { ExplainPanel, HistoryPanel, ProblemsPanel, SourcePanel } from './components/Panels.js';
 import { InsertPaletteHost } from './components/InsertPalette.js';
 import { declaredSchemaLocation } from './state/schema.js';
 import { documentProblems } from './model/problems.js';
+import { isSchemaDocument } from './model/componentTree.js';
 import { EXAMPLE_SCHEMA, EXAMPLE_SCHEMA_NAME } from './examples/purchaseOrder.js';
+import { StartScreen } from './components/StartScreen.js';
+import { FormView } from './components/FormView.js';
+import { PasteSheetHost } from './components/PasteSheet.js';
+import { TableView } from './components/TableView.js';
+import { CoachMarks } from './components/CoachMarks.js';
+import { tableFor } from './model/table.js';
 
-type RightTab = 'source' | 'history';
+type RightTab = 'source' | 'history' | 'explain';
 
 export function App(): React.JSX.Element {
   useEditor();
@@ -17,8 +24,14 @@ export function App(): React.JSX.Element {
   const [problemsOpen, setProblemsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [announcement, setAnnounce] = useState('');
+  // Shown once, dismissed for the session. Gated in memory rather than in storage: a first-run
+  // screen that will not stay dismissed is worse than one that never appears.
+  const [startOpen, setStartOpen] = useState(true);
+  const [formView, setFormView] = useState(false);
+  const [tableView, setTableView] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const schemaInput = useRef<HTMLInputElement>(null);
+  const sampleInput = useRef<HTMLInputElement>(null);
 
   const announce = useCallback((message: string) => setAnnounce(message), []);
 
@@ -43,6 +56,15 @@ export function App(): React.JSX.Element {
         }
       }
 
+      // Stepping the values the scaffolder invented. Bound without a modifier because it is the
+      // main loop after a wizard run, not an occasional command.
+      if (!typing && event.key === 'F7') {
+        event.preventDefault();
+        const moved = store.stepPlaceholder(event.shiftKey ? -1 : 1);
+        announce(moved ? 'Moved to the next value to review.' : 'No values left to review.');
+        return;
+      }
+
       const mod = event.ctrlKey || event.metaKey;
       if (!mod) return;
 
@@ -54,9 +76,12 @@ export function App(): React.JSX.Element {
         event.preventDefault();
         store.redo();
         announce('Redo.');
-      } else if (event.key === 'e') {
+      } else if (event.key === 'e' && !event.shiftKey) {
         event.preventDefault();
         setRightTab((t) => (t === 'source' ? 'history' : 'source'));
+      } else if ((event.key === 'e' || event.key === 'E') && event.shiftKey) {
+        event.preventDefault();
+        setFormView((value) => !value);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -76,6 +101,20 @@ export function App(): React.JSX.Element {
     [store.getSnapshot(), model],
   );
   const problemCount = store.problems.length + schemaIssues;
+  const pending = store.pending.length;
+  // The table is offered against whichever ancestor actually holds a list, so selecting a cell's
+  // element does not make the button disappear from under the user.
+  const tableParent = useMemo(
+    () => {
+      for (const id of [store.selected, ...doc.ancestorsOf(store.selected)]) {
+        if (tableFor(doc, store.schema.model, id) !== null) return id;
+      }
+      return null;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.getSnapshot()],
+  );
+  const verdict = store.verdict.state;
   const suggestedSchema = schemaName === null ? declaredSchemaLocation(doc) : null;
 
   const useExampleSchema = (): void => {
@@ -105,6 +144,7 @@ export function App(): React.JSX.Element {
   const openFile = (file: File): void => {
     void file.text().then((text) => {
       store.load(text, file.name);
+      setStartOpen(false);
       announce(`Opened ${file.name}.`);
     });
   };
@@ -123,7 +163,13 @@ export function App(): React.JSX.Element {
   };
 
   return (
-    <div className="flex h-full flex-col" style={{ background: 'var(--surface-1)' }}>
+    <div className="relative flex h-full flex-col" style={{ background: 'var(--surface-1)' }}>
+      {startOpen && (
+        <StartScreen
+          onDismiss={() => setStartOpen(false)}
+          onOpenFile={() => fileInput.current?.click()}
+        />
+      )}
       <header
         className="flex h-10 shrink-0 items-center gap-2 border-b px-3"
         style={{ borderColor: 'var(--border-default)', background: 'var(--surface-2)' }}
@@ -134,6 +180,7 @@ export function App(): React.JSX.Element {
         </span>
 
         <span
+          data-coach="validity"
           className="ml-1 rounded px-1.5 py-0.5 text-[11px]"
           style={{
             background: problemCount === 0 ? 'var(--ok-soft)' : 'var(--error-soft)',
@@ -144,10 +191,109 @@ export function App(): React.JSX.Element {
             ? `${problemCount} problem${problemCount === 1 ? '' : 's'}`
             : model === null
               ? 'Well-formed'
-              : 'Matches the schema'}
+              : verdict.valid === true && !verdict.stale
+                ? 'Valid'
+                : 'Matches the schema'}
         </span>
 
+        {pending > 0 && (
+          // "Valid but meaningless" is the failure mode of every document generator, and it is
+          // invisible without this: the badge above says green while every date reads 2026-01-01.
+          <button
+            type="button"
+            onClick={() => store.stepPlaceholder(1)}
+            className="tnum rounded px-1.5 py-0.5 text-[11px]"
+            style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)' }}
+            title="Values the wizard invented, which nobody has confirmed yet (F7)"
+          >
+            {pending} to review
+          </button>
+        )}
+
+        {model !== null && (
+          // The second opinion gets its own indicator rather than being folded into the badge
+          // above: "our engine is happy" and "libxml2 is happy" are different claims, and merging
+          // them would hide exactly the disagreement worth seeing.
+          <span
+            className="text-[11px]"
+            style={{ color: 'var(--text-tertiary)', opacity: verdict.stale ? 0.6 : 1 }}
+            title="The authoritative verdict, from libxml2 in a worker"
+          >
+            {verdict.status === 'failed'
+              ? `libxml2: ${verdict.message ?? 'failed'}`
+              : verdict.status === 'compiling'
+                  ? 'libxml2: compiling…'
+                  : verdict.status === 'validating' || verdict.stale
+                    ? 'libxml2: checking…'
+                    : verdict.valid === null
+                      ? ''
+                      : verdict.valid
+                        ? 'libxml2: valid'
+                        : `libxml2: ${verdict.findings.length} error${verdict.findings.length === 1 ? '' : 's'}`}
+          </span>
+        )}
+
         <div className="flex-1" />
+
+        {store.schematron.active && (
+          // Schematron mode. The rules cannot be tried without something to try them against, so
+          // attaching a sample document is the first thing the toolbar offers.
+          <ToolbarButton
+            onClick={() => sampleInput.current?.click()}
+            title={
+              store.schematron.sampleName === null
+                ? 'Attach an XML document to try these rules against'
+                : `Trying rules against ${store.schematron.sampleName}`
+            }
+          >
+            {store.schematron.sampleName === null
+              ? 'Attach sample'
+              : `Sample: ${store.schematron.sampleName}`}
+          </ToolbarButton>
+        )}
+
+        {tableParent !== null && !isSchemaDocument(doc) && (
+          // Offered only where there is actually a list. A grid button that produces an empty grid
+          // teaches someone the feature does not work.
+          <ToolbarButton
+            onClick={() => {
+              setTableView((value) => !value);
+              setFormView(false);
+            }}
+            title="Show the repeated elements here as a grid"
+          >
+            {tableView ? 'Tree' : 'Table'}
+          </ToolbarButton>
+        )}
+
+        {model !== null && !isSchemaDocument(doc) && (
+          // Available only with a schema, because a form is built from one. Offering the toggle
+          // without would be a button that explains why it does nothing.
+          <ToolbarButton
+            onClick={() => {
+              setFormView((value) => !value);
+              setTableView(false);
+            }}
+            title="Fill this document in as a labelled form (Ctrl+Shift+E)"
+          >
+            {formView ? 'Tree' : 'Form'}
+          </ToolbarButton>
+        )}
+
+        {isSchemaDocument(doc) && (
+          // Both views address the same nodes, so this is a lens rather than a mode: selection,
+          // undo and the Inspector all survive the toggle with nothing to synchronise.
+          <ToolbarButton
+            onClick={() => store.setComponentView(!store.componentView)}
+            title={
+              store.componentView
+                ? 'Showing components grouped by kind. Switch to the literal document order.'
+                : 'Showing the document as written. Switch to components grouped by kind.'
+            }
+          >
+            {store.componentView ? 'Components' : 'Source order'}
+          </ToolbarButton>
+        )}
 
         {schemaName === null ? (
           <ToolbarButton onClick={() => schemaInput.current?.click()}>Attach schema</ToolbarButton>
@@ -157,6 +303,7 @@ export function App(): React.JSX.Element {
           </ToolbarButton>
         )}
         <ToolbarButton
+          coach="insert"
           onClick={() => setPaletteOpen(true)}
           disabled={store.schema.model === null}
           title={
@@ -177,6 +324,22 @@ export function App(): React.JSX.Element {
         </ToolbarButton>
         <ToolbarButton onClick={() => fileInput.current?.click()}>Open</ToolbarButton>
         <ToolbarButton onClick={save}>Save</ToolbarButton>
+        <input
+          ref={sampleInput}
+          type="file"
+          accept=".xml,text/xml,application/xml"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file !== undefined) {
+              void file.text().then((text) => {
+                store.attachSample(text, file.name);
+                announce(`Trying the rules against ${file.name}.`);
+              });
+            }
+            e.target.value = '';
+          }}
+        />
         <input
           ref={schemaInput}
           type="file"
@@ -228,14 +391,48 @@ export function App(): React.JSX.Element {
             <Tab active={rightTab === 'history'} onClick={() => setRightTab('history')}>
               History
             </Tab>
+            <Tab active={rightTab === 'explain'} onClick={() => setRightTab('explain')}>
+              Explain
+            </Tab>
           </div>
           <div className="min-h-0 flex-1">
-            {rightTab === 'source' ? <SourcePanel /> : <HistoryPanel />}
+            {rightTab === 'source' ? (
+              <SourcePanel />
+            ) : rightTab === 'history' ? (
+              <HistoryPanel />
+            ) : (
+              <ExplainPanel />
+            )}
           </div>
         </aside>
 
         <main className="flex min-w-0 flex-1 flex-col">
-          {schemaName === null && (
+          {isSchemaDocument(doc) && (
+            // A schema is checked against itself as it is edited, which is the closest thing this
+            // editor has to "run it and see". Saying so is worth a line: otherwise the findings on
+            // the schema element look like they arrived from somewhere else.
+            <div
+              className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]"
+              style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-2)' }}
+            >
+              <span style={{ color: 'var(--text-secondary)' }}>
+                This is an XSD schema. It is compiled against itself as you type — select the schema
+                element for dangling references and ambiguous content models.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const root = doc.documentElement();
+                  if (root !== undefined) store.select(root);
+                }}
+                className="ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[11px]"
+                style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
+              >
+                Check this schema
+              </button>
+            </div>
+          )}
+          {schemaName === null && !store.schematron.active && !isSchemaDocument(doc) && (
             <div
               className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]"
               style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-2)' }}
@@ -250,6 +447,24 @@ export function App(): React.JSX.Element {
                 style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
               >
                 Try the example schema
+              </button>
+            </div>
+          )}
+          {store.schematron.active && store.schematron.sampleName === null && (
+            <div
+              className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]"
+              style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-2)' }}
+            >
+              <span style={{ color: 'var(--text-secondary)' }}>
+                This is a Schematron schema. Attach a sample document to see which rules fire.
+              </span>
+              <button
+                type="button"
+                onClick={() => sampleInput.current?.click()}
+                className="ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[11px]"
+                style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
+              >
+                Attach a sample document
               </button>
             </div>
           )}
@@ -276,14 +491,37 @@ export function App(): React.JSX.Element {
               </button>
             </div>
           )}
-          <div className="min-h-0 flex-1">
-            <Tree />
-          </div>
+          {tableView ? (
+            <div className="flex min-h-0 flex-1">
+              <div className="w-[220px] shrink-0 border-r" style={{ borderColor: 'var(--border-subtle)' }}>
+                <Tree />
+              </div>
+              <div className="min-w-0 flex-1">
+                <TableView parentId={tableParent ?? ROOT_ID} />
+              </div>
+            </div>
+          ) : formView ? (
+            // The tree stays in a narrow gutter for orientation. A form with no structural context
+            // is the thing every "XML made easy" tool ships and every user gets lost in.
+            <div className="flex min-h-0 flex-1">
+              <div className="w-[220px] shrink-0 border-r" style={{ borderColor: 'var(--border-subtle)' }}>
+                <Tree />
+              </div>
+              <div className="min-w-0 flex-1">
+                <FormView rootId={doc.documentElement() ?? ROOT_ID} />
+              </div>
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1">
+              <Tree />
+            </div>
+          )}
           <Breadcrumb />
         </main>
 
         {/* The selection inspector, on the right where this class of panel conventionally lives. */}
         <aside
+          data-coach="inspector"
           className="w-[360px] shrink-0 border-l"
           style={{ borderColor: 'var(--border-default)', background: 'var(--surface-1)' }}
         >
@@ -297,6 +535,7 @@ export function App(): React.JSX.Element {
       >
         <button
           type="button"
+          data-coach="problems"
           onClick={() => setProblemsOpen((v) => !v)}
           className="flex h-7 w-full items-center gap-2 px-3 text-left"
           aria-expanded={problemsOpen}
@@ -337,6 +576,12 @@ export function App(): React.JSX.Element {
         onClose={() => setPaletteOpen(false)}
         onAnnounce={announce}
       />
+
+      <PasteSheetHost />
+
+      {/* Held back until the start screen is out of the way — two first-run surfaces at once is one
+          too many, and the tour is about controls that are behind the overlay anyway. */}
+      <CoachMarks enabled={!startOpen} />
 
       {/*
         One polite live region, written through one place, so ordering and debouncing stay in one
@@ -389,15 +634,19 @@ function ToolbarButton({
   onClick,
   disabled,
   title,
+  coach,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
   title?: string;
+  /** Anchors a first-run coach mark to this control. */
+  coach?: string;
 }): React.JSX.Element {
   return (
     <button
       type="button"
+      data-coach={coach}
       onClick={onClick}
       disabled={disabled}
       title={title}

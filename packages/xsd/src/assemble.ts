@@ -174,7 +174,10 @@ export function assembleSchema(rootUri: string, catalogue: SchemaCatalogue): Sch
     diagnostics.push(...parsed.diagnostics);
     const schema = parsed.schema;
 
-    if (schema.declaredVersion === '1.1') declaredVersion = '1.1';
+    // A schema that uses 1.1 constructs *is* 1.1, whether or not it says `vc:minVersion`. This
+    // matters beyond pedantry: the differential harness dispatches on it, and pointing the 1.0
+    // oracle at a 1.1 schema produces a flood of false failures rather than one honest one.
+    if (schema.declaredVersion === '1.1' || usesVersion11(schema)) declaredVersion = '1.1';
 
     const chameleon = schema.targetNamespace === null && pending.chameleonNamespace !== null;
     const targetNamespace = chameleon ? pending.chameleonNamespace : schema.targetNamespace;
@@ -233,6 +236,21 @@ export function assembleSchema(rootUri: string, catalogue: SchemaCatalogue): Sch
   }
 
   return { rootUri, documents, diagnostics, declaredVersion, namespaces, redefinedOriginals };
+}
+
+/** Whether a parsed schema uses anything XSD 1.0 does not have. */
+function usesVersion11(schema: RawSchema): boolean {
+  if (schema.compositions.some((composition) => composition.kind === 'override')) return true;
+
+  for (const type of schema.types) {
+    if (type.form !== 'complex') continue;
+    if (type.assertions.length > 0) return true;
+    if (type.openContent !== null) return true;
+  }
+  for (const element of schema.elements) {
+    if (element.alternatives.length > 0) return true;
+  }
+  return false;
 }
 
 // --- redefinition -------------------------------------------------------

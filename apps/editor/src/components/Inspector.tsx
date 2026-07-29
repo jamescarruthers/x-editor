@@ -9,8 +9,13 @@ import {
 } from '@x-editor/xml-core';
 import { store, useEditor } from '../state/store.js';
 import { describe, humanise } from '../model/describe.js';
+import { SchematronInspector } from './SchematronSections.js';
+import { XsdInspector } from './XsdSections.js';
+import { FlowEditor } from './FlowEditor.js';
+import { isSchemaDocument } from '../model/componentTree.js';
 import {
   AllowedHere,
+  ProblemsWithThisNode,
   SchemaAttributes,
   SchemaIdentity,
   SchemaValue,
@@ -40,6 +45,12 @@ export function Inspector({
   const model = store.schema.model;
   const context = node.kind === 'element' ? store.contextFor(id) : null;
   const description = describe(doc, id);
+  // Schematron mode replaces the attributes-first layout entirely: the document is shallow and all
+  // the difficulty is in two attributes, so a generic grid would bury the only thing that matters.
+  const schematronMode = store.schematron.active;
+  // XSD mode adds to the layout rather than replacing it. An author editing a schema still wants
+  // the raw attributes — `minOccurs`, `use`, `fixed` — and the authoring sections sit above them.
+  const xsdMode = isSchemaDocument(doc);
 
   return (
     <div className="scroll-thin flex h-full flex-col overflow-y-auto">
@@ -77,6 +88,12 @@ export function Inspector({
         </Section>
       )}
 
+      {xsdMode && <XsdInspector />}
+
+      {/* Above the attribute grid: for a paragraph, the flow *is* the content, and having to scroll
+          past six settings to reach it would be the same mistake the tree makes. */}
+      {node.kind === 'element' && <FlowEditor id={id} />}
+
       {/* The schema-driven attributes editor replaces the raw one entirely rather than sitting
           beside it: two attribute lists on one panel is the sort of thing that reads as a bug. */}
       {context !== null && <SchemaAttributes context={context} />}
@@ -92,6 +109,12 @@ export function Inspector({
             onCommit={(v) => store.run(setTextValue(doc, id, v))}
           />
         </Section>
+      )}
+
+      {schematronMode && <SchematronInspector />}
+
+      {model !== null && context !== null && (
+        <ProblemsWithThisNode context={context} model={model} />
       )}
 
       {model !== null && context !== null ? (
