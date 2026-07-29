@@ -10,6 +10,7 @@ import { loadXPath, type ElementContext, type SchemaDiagnostic } from '@x-editor
 import { SchemaStore } from './schema.js';
 import { ValidationClient } from './validation.js';
 import { SchematronStore } from './schematron.js';
+import { isSchemaDocument } from '../model/componentTree.js';
 
 /**
  * The document lives outside React.
@@ -35,10 +36,24 @@ class EditorStore {
   /** Schematron mode: the schema being edited, and the sample document it is tried against. */
   readonly schematron = new SchematronStore();
 
+  /**
+   * XSD mode shows the component view by default.
+   *
+   * A schema's source order is an accident of how it was written; its component structure is what
+   * the author thinks in. Both address the same nodes, so the toggle costs nothing to keep in step.
+   */
+  componentView = false;
+
   constructor(source: string, fileName: string) {
     this.doc = XmlDocument.parse(source);
     this.fileName = fileName;
     this.expandInitial();
+  }
+
+  setComponentView(on: boolean): void {
+    if (this.componentView === on) return;
+    this.componentView = on;
+    this.emit();
   }
 
   private expandInitial(): void {
@@ -76,6 +91,8 @@ class EditorStore {
     this.fileName = fileName;
     this.expanded = new Set();
     this.selected = ROOT_ID;
+    // A schema opens in the component view, an instance in the literal one.
+    this.componentView = isSchemaDocument(this.doc);
     this.expandInitial();
     this.emit();
   }

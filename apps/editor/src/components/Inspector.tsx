@@ -10,6 +10,8 @@ import {
 import { store, useEditor } from '../state/store.js';
 import { describe, humanise } from '../model/describe.js';
 import { SchematronInspector } from './SchematronSections.js';
+import { XsdInspector } from './XsdSections.js';
+import { isSchemaDocument } from '../model/componentTree.js';
 import {
   AllowedHere,
   ProblemsWithThisNode,
@@ -45,6 +47,9 @@ export function Inspector({
   // Schematron mode replaces the attributes-first layout entirely: the document is shallow and all
   // the difficulty is in two attributes, so a generic grid would bury the only thing that matters.
   const schematronMode = store.schematron.active;
+  // XSD mode adds to the layout rather than replacing it. An author editing a schema still wants
+  // the raw attributes — `minOccurs`, `use`, `fixed` — and the authoring sections sit above them.
+  const xsdMode = isSchemaDocument(doc);
 
   return (
     <div className="scroll-thin flex h-full flex-col overflow-y-auto">
@@ -81,6 +86,8 @@ export function Inspector({
           )}
         </Section>
       )}
+
+      {xsdMode && <XsdInspector />}
 
       {/* The schema-driven attributes editor replaces the raw one entirely rather than sitting
           beside it: two attribute lists on one panel is the sort of thing that reads as a bug. */}

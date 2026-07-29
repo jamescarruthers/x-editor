@@ -4,6 +4,7 @@ import { qnameToString, type NodeId } from '@x-editor/xml-core';
 import { store, useEditor } from '../state/store.js';
 import { missingRequiredAttributes, requiredMissing } from '@x-editor/xsd';
 import { buildRows, nodeLabel, textPreview, type Row } from '../model/rows.js';
+import { buildComponentRows } from '../model/componentTree.js';
 
 const ROW_HEIGHT = 28;
 
@@ -27,7 +28,10 @@ export function Tree(): React.JSX.Element {
   const typeahead = useRef<{ buffer: string; at: number }>({ buffer: '', at: 0 });
 
   const rows = useMemo(
-    () => buildRows(doc, store.expanded),
+    () =>
+      store.componentView
+        ? buildComponentRows(doc, store.expanded)
+        : buildRows(doc, store.expanded),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [doc, store.getSnapshot()],
   );
@@ -213,7 +217,7 @@ function TreeRow({
         aria-hidden
         onClick={(e) => {
           e.stopPropagation();
-          if (row.hasChildren) store.toggleExpanded(row.id);
+          if (row.hasChildren) store.toggleExpanded(row.headingKey ?? row.id);
         }}
         className="grid size-6 shrink-0 place-items-center"
         style={{ visibility: row.hasChildren ? 'visible' : 'hidden' }}
@@ -232,9 +236,18 @@ function TreeRow({
         </svg>
       </button>
 
-      <NodeGlyph kind={node.kind} />
+      {row.heading !== undefined ? (
+        <span
+          className="text-[11px] font-semibold tracking-wide uppercase"
+          style={{ color: 'var(--text-tertiary)' }}
+        >
+          {row.heading}
+        </span>
+      ) : null}
 
-      {node.kind === 'element' ? (
+      {row.heading === undefined && <NodeGlyph kind={node.kind} />}
+
+      {row.heading === undefined && node.kind === 'element' ? (
         <>
           {node.name.prefix !== '' && (
             <span
@@ -245,8 +258,14 @@ function TreeRow({
             </span>
           )}
           <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-            {node.name.localName}
+            {row.componentLabel ?? node.name.localName}
           </span>
+
+          {row.componentDetail !== undefined && row.componentDetail !== '' && (
+            <span className="shrink-0 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+              {row.componentDetail}
+            </span>
+          )}
 
           <SchemaBadge row={row} />
 

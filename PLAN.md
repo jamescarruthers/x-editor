@@ -4,15 +4,15 @@ A browser-based, tree-node editor for **XML**, **XSD** and **Schematron**, with 
 validation running client-side, designed so that someone who does not already know the schema can
 still produce a valid document.
 
-**Status:** Phases 0–5 implemented. `packages/xml-core` (lossless CST, command log, splice
+**Status:** Phases 0–6 implemented. `packages/xml-core` (lossless CST, command log, splice
 serializer), `packages/xsd` (schema front end, simple- and complex-type compilers, Glushkov
 automaton, query API) and `apps/editor` (four-region shell, virtualized tree, Insert palette,
-schema-driven Inspector), `packages/validation-protocol` and `packages/xsd-libxml2` (the
-authoritative verdict, in a worker) and `packages/schematron` (a direct interpreter over fontoxpath,
-with the live test harness) are in place, with ~495 tests. Every verdict is checked against an
-independent implementation: `libxml2-wasm` for XSD 1.0, `xmlschema` for 1.1, and the ISO Schematron
-reference for Schematron. **Phase 6 — XSD authoring — is next.** See §10 for the roadmap and
-the per-phase *done when*.
+schema-driven Inspector, XSD component view and refactorings), `packages/validation-protocol` and
+`packages/xsd-libxml2` (the authoritative verdict, in a worker) and `packages/schematron` (a direct
+interpreter over fontoxpath, with the live test harness) are in place, with ~530 tests. Every verdict
+is checked against an independent implementation: `libxml2-wasm` for XSD 1.0, `xmlschema` for 1.1,
+and the ISO Schematron reference for Schematron. **Phase 7 — beginner scaffolding — is next.** See
+§10 for the roadmap and the per-phase *done when*.
 
 **Companion documents**
 
@@ -563,9 +563,50 @@ Written from scratch rather than forked from `node-schematron`: the parts that w
 reused are the parts our own CST and XPath facade already provide, and what remains — first-match-
 wins claiming, the statistics, abstract-pattern expansion — is the substance of the phase.
 
-### Phase 6 — XSD authoring (medium)
+### Phase 6 — XSD authoring (medium) — **done**
 Component tree, facets editor with live type testing, XSD regex translator, refactorings (rename with
 ref updates, extract/inline type), schema self-validation including UPA warnings.
+**Done when:** a schema author can rename a type, extract an anonymous one, and be told their content
+model is ambiguous, without leaving the editor or breaking the file.
+
+All three hold, and the phase is built on one decision worth stating: **a schema is a graph written
+as a tree**, and the tree view is structurally incapable of showing the edges. `type="Address"` is a
+reference the outline cannot draw, which is why every operation here exists — each one is something
+that means "find all the edges yourself, and get none of them wrong".
+
+The component view (`apps/editor/src/model/componentTree.ts`) is a *projection* over the same CST,
+not a second model. Rows address the same `NodeId`s, so selection, the Inspector and undo all work
+across the toggle with nothing to synchronise — every sync bug in this class of tool lives in the gap
+between two representations of one document. Heading rows are synthetic and their collapsed state is
+encoded outside the real `NodeId` range, so collapsing "Simple types" does not collapse the schema
+element it hangs from.
+
+Rename, extract and inline are in `apps/editor/src/model/xsdAuthoring.ts`, and none of them consults
+the compiled model to find references. That is deliberate: renaming has to work on a schema that does
+not currently compile, which is the state a schema is in for most of the time anyone is editing it.
+References are found syntactically from a table of the twelve QName-valued attributes in XSD, kept in
+their six symbol spaces — `ref` means three different things depending on the element it sits on, so
+a generic rule would silently merge a group and a type of the same name.
+
+Three things the refactorings refuse to do, each because the alternative is a confident wrong answer:
+inline a type more than one declaration shares; extract under a name already taken; and extract when
+no correct reference text exists at all (no target namespace, but a default `xmlns` in scope, so
+"a name in no namespace" cannot be written in an attribute value). A round-trip test asserts that
+extract-then-inline returns the file byte-for-byte, including indentation — both operations move a
+subtree between depths, and a reformat nobody asked for is the fastest way to get a tool banned.
+
+Self-validation reports what parses and is still wrong: dangling references and ambiguous content
+models. The dangling-reference check stays quiet when the schema has an `include` or `import`,
+because the missing component may well be in a document this editor was never given. Its most useful
+output is the hint on the commonest XSD bug of all — a `targetNamespace` with no matching default
+`xmlns`, so every unprefixed reference means a name in no namespace while pointing at a declaration
+sitting visibly two lines below.
+
+The facets panel is built around a live test box rather than a form. A facet list tells an author
+what they wrote; typing a value that ought to be legal and watching it fail tells them what they
+*meant*. It surfaces the XSD regex translator directly, including its two honest failure modes — a
+pattern that could not be read, and one checked loosely because it uses a Unicode property inside a
+subtraction.
 
 ### Phase 7 — Beginner scaffolding (medium)
 Form view, the new-document wizard, onboarding empty states and the three bundled examples, smart

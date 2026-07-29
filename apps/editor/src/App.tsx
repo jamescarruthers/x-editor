@@ -7,6 +7,7 @@ import { HistoryPanel, ProblemsPanel, SourcePanel } from './components/Panels.js
 import { InsertPaletteHost } from './components/InsertPalette.js';
 import { declaredSchemaLocation } from './state/schema.js';
 import { documentProblems } from './model/problems.js';
+import { isSchemaDocument } from './model/componentTree.js';
 import { EXAMPLE_SCHEMA, EXAMPLE_SCHEMA_NAME } from './examples/purchaseOrder.js';
 
 type RightTab = 'source' | 'history';
@@ -193,6 +194,21 @@ export function App(): React.JSX.Element {
           </ToolbarButton>
         )}
 
+        {isSchemaDocument(doc) && (
+          // Both views address the same nodes, so this is a lens rather than a mode: selection,
+          // undo and the Inspector all survive the toggle with nothing to synchronise.
+          <ToolbarButton
+            onClick={() => store.setComponentView(!store.componentView)}
+            title={
+              store.componentView
+                ? 'Showing components grouped by kind. Switch to the literal document order.'
+                : 'Showing the document as written. Switch to components grouped by kind.'
+            }
+          >
+            {store.componentView ? 'Components' : 'Source order'}
+          </ToolbarButton>
+        )}
+
         {schemaName === null ? (
           <ToolbarButton onClick={() => schemaInput.current?.click()}>Attach schema</ToolbarButton>
         ) : (
@@ -295,7 +311,32 @@ export function App(): React.JSX.Element {
         </aside>
 
         <main className="flex min-w-0 flex-1 flex-col">
-          {schemaName === null && !store.schematron.active && (
+          {isSchemaDocument(doc) && (
+            // A schema is checked against itself as it is edited, which is the closest thing this
+            // editor has to "run it and see". Saying so is worth a line: otherwise the findings on
+            // the schema element look like they arrived from somewhere else.
+            <div
+              className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]"
+              style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-2)' }}
+            >
+              <span style={{ color: 'var(--text-secondary)' }}>
+                This is an XSD schema. It is compiled against itself as you type — select the schema
+                element for dangling references and ambiguous content models.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const root = doc.documentElement();
+                  if (root !== undefined) store.select(root);
+                }}
+                className="ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[11px]"
+                style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
+              >
+                Check this schema
+              </button>
+            </div>
+          )}
+          {schemaName === null && !store.schematron.active && !isSchemaDocument(doc) && (
             <div
               className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]"
               style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-2)' }}
