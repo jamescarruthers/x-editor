@@ -13,6 +13,7 @@ import { StartScreen } from './components/StartScreen.js';
 import { FormView } from './components/FormView.js';
 import { PasteSheetHost } from './components/PasteSheet.js';
 import { TableView } from './components/TableView.js';
+import { CoachMarks } from './components/CoachMarks.js';
 import { tableFor } from './model/table.js';
 
 type RightTab = 'source' | 'history' | 'explain';
@@ -179,6 +180,7 @@ export function App(): React.JSX.Element {
         </span>
 
         <span
+          data-coach="validity"
           className="ml-1 rounded px-1.5 py-0.5 text-[11px]"
           style={{
             background: problemCount === 0 ? 'var(--ok-soft)' : 'var(--error-soft)',
@@ -301,6 +303,7 @@ export function App(): React.JSX.Element {
           </ToolbarButton>
         )}
         <ToolbarButton
+          coach="insert"
           onClick={() => setPaletteOpen(true)}
           disabled={store.schema.model === null}
           title={
@@ -518,6 +521,7 @@ export function App(): React.JSX.Element {
 
         {/* The selection inspector, on the right where this class of panel conventionally lives. */}
         <aside
+          data-coach="inspector"
           className="w-[360px] shrink-0 border-l"
           style={{ borderColor: 'var(--border-default)', background: 'var(--surface-1)' }}
         >
@@ -531,6 +535,7 @@ export function App(): React.JSX.Element {
       >
         <button
           type="button"
+          data-coach="problems"
           onClick={() => setProblemsOpen((v) => !v)}
           className="flex h-7 w-full items-center gap-2 px-3 text-left"
           aria-expanded={problemsOpen}
@@ -573,6 +578,10 @@ export function App(): React.JSX.Element {
       />
 
       <PasteSheetHost />
+
+      {/* Held back until the start screen is out of the way — two first-run surfaces at once is one
+          too many, and the tour is about controls that are behind the overlay anyway. */}
+      <CoachMarks enabled={!startOpen} />
 
       {/*
         One polite live region, written through one place, so ordering and debouncing stay in one
@@ -625,15 +634,19 @@ function ToolbarButton({
   onClick,
   disabled,
   title,
+  coach,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
   title?: string;
+  /** Anchors a first-run coach mark to this control. */
+  coach?: string;
 }): React.JSX.Element {
   return (
     <button
       type="button"
+      data-coach={coach}
       onClick={onClick}
       disabled={disabled}
       title={title}

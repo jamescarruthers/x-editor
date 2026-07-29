@@ -681,9 +681,27 @@ row missing an optional child does not lose the column for the rest, and a cell 
 absent creates it on first edit rather than being a hole. Nested children never become columns: they
 would produce a grid whose columns mean different things at different depths.
 
+**Offline** is done, and is part of the security story rather than a nicety: the whole premise is
+that documents never leave the browser (§8), and a validator that stops working on a train
+contradicts its own claim. The service worker is generated against the real build output by
+`apps/editor/scripts/build-sw.mjs` — hand-written rather than `vite-plugin-pwa`, because the entire
+requirement is "cache these seven files and serve them back" and a dependency whose configuration
+surface exceeds the thing it configures is a liability. The cache name carries a hash of its
+contents, so a new build invalidates the old cache wholesale rather than relying on someone
+remembering to bump a version. CI asserts the worker exists and covers every chunk, since the
+failure mode is a build-step change silently dropping it. libxml2's WASM is base64-embedded in the
+worker bundle, so validation works offline too.
+
+**First-run coach marks** are done: four, sequential, anchored to real controls, and never modal —
+everything underneath stays clickable, so someone who would rather just start is never blocked by
+the explanation of how to start. `Escape` dismisses all of them, because a person pressing Escape is
+telling you they do not want the tour and asking twice more is not listening.
+
 **Not done, and not claimed:** the XSD box diagram (deferred in §7 on the grounds that beginners
-cannot read that notation, and unchanged), PWA/offline, i18n, first-run coach marks, and expert
-mode's chrome removal. None changes what the tool can do.
+cannot read that notation, and unchanged), i18n, and expert mode's chrome removal. i18n in
+particular is left alone deliberately — every user-facing string in this codebase is written to be
+read, and threading them through a message catalogue is a refactor that should happen when there is
+a second locale to test against, not before. Neither changes what the tool can do.
 
 ---
 

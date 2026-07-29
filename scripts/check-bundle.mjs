@@ -1,5 +1,5 @@
 import { gzipSync } from 'node:zlib';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -56,5 +56,21 @@ const expectSeparate = (label, matches) => {
 
 expectSeparate('the XPath engine', (name) => name.includes('fontoxpath'));
 expectSeparate('the validation worker', (name) => name.includes('validation.worker'));
+
+// Offline is part of the security story rather than a nicety: the premise is that documents never
+// leave the browser, and a validator that stops working on a train contradicts that. The generated
+// worker lists dist by hand, so the failure mode is that a build-step change silently drops it.
+const serviceWorker = new URL('../apps/editor/dist/sw.js', import.meta.url).pathname;
+if (!existsSync(serviceWorker)) {
+  fail('dist/sw.js is missing — the service worker was not generated, so the app is not offline-capable.');
+} else {
+  const cached = readFileSync(serviceWorker, 'utf8');
+  const missing = files.filter((name) => !cached.includes(name));
+  if (missing.length > 0) {
+    fail(`the service worker does not cache ${missing.join(', ')} — those chunks would fail offline.`);
+  } else {
+    console.log(`✓ the service worker caches all ${files.length} JS chunks`);
+  }
+}
 
 process.exit(failed ? 1 : 0);
