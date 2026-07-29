@@ -42,6 +42,14 @@ export function Tree(): React.JSX.Element {
     return map;
   }, [rows]);
 
+  // Computed once per render rather than per row: the virtualizer renders about thirty rows and the
+  // placeholder list can be hundreds long, so per-row scanning would be a product of the two.
+  const pending = useMemo(
+    () => new Set(store.pending.map((placeholder) => placeholder.node)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.getSnapshot()],
+  );
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
@@ -161,6 +169,7 @@ export function Tree(): React.JSX.Element {
               top={item.start}
               posInSet={item.index + 1}
               setSize={rows.length}
+              pending={pending}
             />
           );
         })}
@@ -175,16 +184,19 @@ function TreeRow({
   top,
   posInSet,
   setSize,
+  pending,
 }: {
   row: Row;
   selected: boolean;
   top: number;
   posInSet: number;
   setSize: number;
+  pending: ReadonlySet<NodeId>;
 }): React.JSX.Element {
   const doc = store.document;
   const node = row.node;
   const preview = node.kind === 'element' ? textPreview(doc, row.id) : null;
+  const unreviewed = pending.has(row.id);
 
   const attributes =
     node.kind === 'element'
@@ -294,8 +306,14 @@ function TreeRow({
           )}
 
           {preview !== null && (
-            <span className="truncate italic" style={{ color: 'var(--text-tertiary)' }}>
-              = {preview}
+            // A generated value is marked wherever it appears, not only counted in the app bar.
+            // "Valid but meaningless" is only visible if the meaningless part is visible.
+            <span
+              className="truncate italic"
+              style={{ color: 'var(--text-tertiary)' }}
+              title={unreviewed ? 'A value the wizard invented — F7 steps through them' : undefined}
+            >
+              {unreviewed && '• '}= {preview}
             </span>
           )}
         </>

@@ -9,6 +9,7 @@ import { declaredSchemaLocation } from './state/schema.js';
 import { documentProblems } from './model/problems.js';
 import { isSchemaDocument } from './model/componentTree.js';
 import { EXAMPLE_SCHEMA, EXAMPLE_SCHEMA_NAME } from './examples/purchaseOrder.js';
+import { StartScreen } from './components/StartScreen.js';
 
 type RightTab = 'source' | 'history';
 
@@ -18,6 +19,9 @@ export function App(): React.JSX.Element {
   const [problemsOpen, setProblemsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [announcement, setAnnounce] = useState('');
+  // Shown once, dismissed for the session. Gated in memory rather than in storage: a first-run
+  // screen that will not stay dismissed is worse than one that never appears.
+  const [startOpen, setStartOpen] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
   const schemaInput = useRef<HTMLInputElement>(null);
   const sampleInput = useRef<HTMLInputElement>(null);
@@ -43,6 +47,15 @@ export function App(): React.JSX.Element {
           setPaletteOpen(true);
           return;
         }
+      }
+
+      // Stepping the values the scaffolder invented. Bound without a modifier because it is the
+      // main loop after a wizard run, not an occasional command.
+      if (!typing && event.key === 'F7') {
+        event.preventDefault();
+        const moved = store.stepPlaceholder(event.shiftKey ? -1 : 1);
+        announce(moved ? 'Moved to the next value to review.' : 'No values left to review.');
+        return;
       }
 
       const mod = event.ctrlKey || event.metaKey;
@@ -78,6 +91,7 @@ export function App(): React.JSX.Element {
     [store.getSnapshot(), model],
   );
   const problemCount = store.problems.length + schemaIssues;
+  const pending = store.pending.length;
   const verdict = store.verdict.state;
   const suggestedSchema = schemaName === null ? declaredSchemaLocation(doc) : null;
 
@@ -108,6 +122,7 @@ export function App(): React.JSX.Element {
   const openFile = (file: File): void => {
     void file.text().then((text) => {
       store.load(text, file.name);
+      setStartOpen(false);
       announce(`Opened ${file.name}.`);
     });
   };
@@ -126,7 +141,13 @@ export function App(): React.JSX.Element {
   };
 
   return (
-    <div className="flex h-full flex-col" style={{ background: 'var(--surface-1)' }}>
+    <div className="relative flex h-full flex-col" style={{ background: 'var(--surface-1)' }}>
+      {startOpen && (
+        <StartScreen
+          onDismiss={() => setStartOpen(false)}
+          onOpenFile={() => fileInput.current?.click()}
+        />
+      )}
       <header
         className="flex h-10 shrink-0 items-center gap-2 border-b px-3"
         style={{ borderColor: 'var(--border-default)', background: 'var(--surface-2)' }}
@@ -151,6 +172,20 @@ export function App(): React.JSX.Element {
                 ? 'Valid'
                 : 'Matches the schema'}
         </span>
+
+        {pending > 0 && (
+          // "Valid but meaningless" is the failure mode of every document generator, and it is
+          // invisible without this: the badge above says green while every date reads 2026-01-01.
+          <button
+            type="button"
+            onClick={() => store.stepPlaceholder(1)}
+            className="tnum rounded px-1.5 py-0.5 text-[11px]"
+            style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)' }}
+            title="Values the wizard invented, which nobody has confirmed yet (F7)"
+          >
+            {pending} to review
+          </button>
+        )}
 
         {model !== null && (
           // The second opinion gets its own indicator rather than being folded into the badge

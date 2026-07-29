@@ -185,6 +185,7 @@ export type {
   ElementContext,
   InsertCandidate,
   PlannedInsert,
+  SkeletonAttribute,
   SkeletonNode,
   SkeletonOptions,
 } from './query.js';

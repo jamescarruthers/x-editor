@@ -192,7 +192,7 @@ export function buildInsertCommands(
   const declaration = model === null ? null : model.globalElement(name) ?? localDeclaration(model, doc, parentId, name);
   const skeleton: SkeletonNode =
     model === null || declaration === null
-      ? { name, attributes: [], children: [], text: null }
+      ? { name, attributes: [], children: [], text: null, textPlaceholder: false }
       : skeletonFor(model, declaration, { maxDepth: 3 });
 
   const { commands } = buildSkeleton(doc, parentId, target, skeleton, indent, 0);

@@ -558,9 +558,23 @@ export function validateText(context: ElementContext, text: string): ValueProble
 
 export interface SkeletonNode {
   readonly name: ElementName;
-  readonly attributes: readonly { name: XsdQName; value: string }[];
+  readonly attributes: readonly SkeletonAttribute[];
   readonly children: readonly SkeletonNode[];
   readonly text: string | null;
+  /**
+   * True when `text` was invented to satisfy the type rather than taken from `fixed` or `default`.
+   *
+   * The distinction matters downstream: a generated value is *valid and meaningless*, and turning it
+   * into a reviewable to-do list is what stops a wizard handing someone a document full of
+   * `2026-01-01` they never notice. A `fixed` value is neither generated nor reviewable.
+   */
+  readonly textPlaceholder: boolean;
+}
+
+export interface SkeletonAttribute {
+  readonly name: XsdQName;
+  readonly value: string;
+  readonly placeholder: boolean;
 }
 
 export interface SkeletonOptions {
@@ -594,22 +608,27 @@ function build(
   stack: Set<string>,
 ): SkeletonNode {
   const type = model.typeOf(element);
-  const attributes: { name: XsdQName; value: string }[] = [];
+  const attributes: SkeletonAttribute[] = [];
   const children: SkeletonNode[] = [];
   let text: string | null = null;
+  let textPlaceholder = false;
 
   if (type.form === 'complex') {
     for (const use of type.attributes) {
       if (use.use !== 'required' && include === 'required') continue;
       if (use.use === 'prohibited') continue;
+      const authored = use.fixedValue ?? use.defaultValue;
       attributes.push({
         name: use.name,
-        value: use.fixedValue ?? use.defaultValue ?? placeholderFor(use.type),
+        value: authored ?? placeholderFor(use.type),
+        placeholder: authored === null,
       });
     }
 
     if (type.contentKind === 'simple' && type.simpleType !== null) {
-      text = element.fixedValue ?? element.defaultValue ?? placeholderFor(type.simpleType);
+      const authored = element.fixedValue ?? element.defaultValue;
+      text = authored ?? placeholderFor(type.simpleType);
+      textPlaceholder = authored === null;
     } else if (depth > 0) {
       const key = qnameKey(element.name);
       // A recursive type would otherwise expand until the depth budget ran out, producing a
@@ -621,10 +640,12 @@ function build(
       }
     }
   } else {
-    text = element.fixedValue ?? element.defaultValue ?? placeholderFor(type);
+    const authored = element.fixedValue ?? element.defaultValue;
+    text = authored ?? placeholderFor(type);
+    textPlaceholder = authored === null;
   }
 
-  return { name: element.name, attributes, children, text };
+  return { name: element.name, attributes, children, text, textPlaceholder };
 }
 
 function skeletonChildren(

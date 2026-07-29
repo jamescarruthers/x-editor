@@ -11,6 +11,13 @@ import { SchemaStore } from './schema.js';
 import { ValidationClient } from './validation.js';
 import { SchematronStore } from './schematron.js';
 import { isSchemaDocument } from '../model/componentTree.js';
+import {
+  nextPlaceholder,
+  pendingPlaceholders,
+  resolvePlaceholders,
+  type Placeholder,
+  type Scaffold,
+} from '../model/scaffold.js';
 
 /**
  * The document lives outside React.
@@ -43,6 +50,16 @@ class EditorStore {
    * the author thinks in. Both address the same nodes, so the toggle costs nothing to keep in step.
    */
   componentView = false;
+
+  /**
+   * The values the scaffolder invented, and what it invented them as.
+   *
+   * A generated document is valid and meaningless; this is what turns that into a to-do list. Held
+   * as the generated values rather than as a "needs review" flag, so whether one has been reviewed
+   * is answered by comparing against the document — which is exact, survives undo, and needs no
+   * hook in the edit path to keep in step.
+   */
+  placeholders: readonly Placeholder[] = [];
 
   constructor(source: string, fileName: string) {
     this.doc = XmlDocument.parse(source);
@@ -91,10 +108,44 @@ class EditorStore {
     this.fileName = fileName;
     this.expanded = new Set();
     this.selected = ROOT_ID;
+    this.placeholders = [];
     // A schema opens in the component view, an instance in the literal one.
     this.componentView = isSchemaDocument(this.doc);
     this.expandInitial();
     this.emit();
+  }
+
+  /**
+   * Load a document the wizard generated, keeping track of what it invented.
+   *
+   * Separate from `load` because the placeholder paths are only meaningful against the text that
+   * produced them — resolving them anywhere else would bind them to whatever happens to sit at
+   * those indices.
+   */
+  loadScaffold(scaffold: Scaffold, fileName: string): void {
+    this.load(scaffold.source, fileName);
+    this.placeholders = resolvePlaceholders(this.doc, scaffold.placeholders);
+    const first = this.pending[0];
+    if (first !== undefined) {
+      this.selected = first.node;
+      for (const ancestor of this.doc.ancestorsOf(first.node)) this.expanded.add(ancestor);
+    }
+    this.emit();
+  }
+
+  /** The generated values nobody has looked at yet. */
+  get pending(): readonly Placeholder[] {
+    return pendingPlaceholders(this.doc, this.placeholders);
+  }
+
+  /** Steps to the next unreviewed generated value. Bound to F7 / Shift+F7. */
+  stepPlaceholder(direction: 1 | -1): boolean {
+    const target = nextPlaceholder(this.doc, this.placeholders, this.selected, direction);
+    if (target === null) return false;
+    this.selected = target;
+    for (const ancestor of this.doc.ancestorsOf(target)) this.expanded.add(ancestor);
+    this.emit();
+    return true;
   }
 
   run(command: Command): void {
@@ -175,8 +226,12 @@ class EditorStore {
 
   // --- schema ------------------------------------------------------------
 
-  attachSchema(fileName: string, source: string): void {
-    this.schemaProblems = this.schema.attach(fileName, source);
+  attachSchema(
+    fileName: string,
+    source: string,
+    supporting: Readonly<Record<string, string>> = {},
+  ): void {
+    this.schemaProblems = this.schema.attach(fileName, source, supporting);
     this.verdict.setSchema(this.schema.sources(), fileName);
     this.verdict.request(this.doc);
     this.emit();

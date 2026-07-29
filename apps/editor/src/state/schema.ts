@@ -24,8 +24,17 @@ export class SchemaStore {
 
   private catalogue: Record<string, string> = {};
 
-  attach(fileName: string, source: string): SchemaDiagnostic[] {
-    this.catalogue = { ...this.catalogue, [fileName]: source };
+  /**
+   * @param supporting Documents the schema's own `include`/`import` will reach for, added in the
+   * same step. Attaching them afterwards would compile the schema once with them missing, which
+   * shows the user a burst of errors that resolve themselves a moment later.
+   */
+  attach(
+    fileName: string,
+    source: string,
+    supporting: Readonly<Record<string, string>> = {},
+  ): SchemaDiagnostic[] {
+    this.catalogue = { ...this.catalogue, ...supporting, [fileName]: source };
     this.name = fileName;
     const set = assembleSchema(fileName, catalogueFrom(this.catalogue));
     this.model = new SchemaModel(set);
