@@ -10,25 +10,26 @@ Four regions, all resizable, sizes persisted per breakpoint bucket via `react-re
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │ App bar 40px — tabs · schema chip · validity pill · Tree|Form|Source   │
-├──────────────┬──────────────────────────────────┬──────────────────────┤
-│              │                                  │                      │
-│  INSPECTOR   │            TREE                  │   DERIVED VIEWS      │
-│  360px       │            flex, min 480px       │   380px              │
-│  (280–560)   │                                  │   (320–560)          │
-│              │                                  │   Source│Diagram│    │
-│              │                                  │   History            │
-│              ├──────────────────────────────────┤                      │
-│              │ breadcrumb 28px                  │                      │
-├──────────────┴──────────────────────────────────┴──────────────────────┤
+├──────────────────────┬──────────────────────────────────┬──────────────┤
+│                      │                                  │              │
+│   DERIVED VIEWS      │            TREE                  │  INSPECTOR   │
+│   380px              │            flex, min 480px       │  360px       │
+│   (320–560)          │                                  │  (280–560)   │
+│   Source│Diagram│    │                                  │              │
+│   History            │                                  │              │
+│                      ├──────────────────────────────────┤              │
+│                      │ breadcrumb 28px                  │              │
+├──────────────────────┴──────────────────────────────────┴──────────────┤
 │ PROBLEMS — 28px strip, expands 180–360px                               │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### The left panel is the selection inspector
+### The right panel is the selection inspector
 
-The brief mandates the attributes editor on the left. The right generalisation is that **everything
-about the selected node lives in one fixed place** — the property beginners rely on most. Stacked
-sections, in order:
+The attributes editor lives on the right, where property panels conventionally sit. The
+generalisation worth keeping is that it is the *selection inspector* rather than just an attributes
+grid: **everything about the selected node lives in one fixed place** — the property beginners rely
+on most. Stacked sections, in order:
 
 1. **Identity header** — QName, validity badge
 2. **What is this?** — documentation card (§6)
@@ -45,9 +46,9 @@ without a second layout implementation.
 | Width | Behaviour |
 |---|---|
 | ≥1600 | all four regions open, right panel showing Source |
-| 1280–1599 | right panel auto-collapses to its rail; Source becomes a `Ctrl+E` overlay splitting the centre **horizontally** rather than stealing tree width; Inspector 320px |
-| 1024–1279 | Inspector 300px; right panel rail only; Problems overlays with a scrim rather than pushing layout |
-| <1024 (tablet) | single column, bottom segmented control Tree \| Inspector \| Problems; selecting a node slides the Inspector in as a **left-anchored** sheet (honouring the brief); Insert palette becomes a full-screen sheet at 44px rows |
+| 1280–1599 | left panel auto-collapses to its rail; Source becomes a `Ctrl+E` overlay splitting the centre **horizontally** rather than stealing tree width; Inspector 320px |
+| 1024–1279 | Inspector 300px; left panel rail only; Problems overlays with a scrim rather than pushing layout |
+| <1024 (tablet) | single column, bottom segmented control Tree \| Inspector \| Problems; selecting a node slides the Inspector in as a right-anchored sheet; Insert palette becomes a full-screen sheet at 44px rows |
 | phone | **explicitly out of scope** — say so rather than half-supporting it |
 
 ## 2. The tree
@@ -482,8 +483,6 @@ this palette with no special-casing.
 - **Stylus Studio's and XMLSpy's modal-dialog-heavy flows** — everything here is inline or a dismissible
   popover.
 - Surfacing raw `cvc-*` strings as primary text anywhere.
-- **A right-hand inspector**, however conventional (Figma, Xcode and Sanity all put it right) — the
-  brief mandates left, and consistency with the mandate beats convention.
 - `role="treegrid"`. Animating tree expand/collapse height. Infinite-nesting breadcrumbs.
 
 ## 11. Performance constraints that shape the UI

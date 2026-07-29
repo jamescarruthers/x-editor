@@ -1,0 +1,61 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Allow the workflow to publish to Pages, but nothing else.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never cancel a running deployment; queue behind it instead.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build
+        # A project Pages site is served from /<repo>/, so the base path must match the repo name.
+        run: pnpm -C apps/editor build
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}/
+
+      - name: Add SPA fallback
+        # Pages has no rewrite rules, so a 404 copy of index.html is how a client-routed app
+        # survives a deep link or a refresh.
+        run: cp apps/editor/dist/index.html apps/editor/dist/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/editor/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

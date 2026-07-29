@@ -310,15 +310,21 @@ SEPA pain.001), with a published pass-rate figure so nobody can quietly claim th
 
 Full specification in [`docs/ux-spec.md`](docs/ux-spec.md). The essentials:
 
-**Four-region shell.** App bar (40px) / **left Inspector** (360px, resizable 280–560) / **centre
-Tree** (flexible, min 480) / right Derived views (Source, Diagram, History) / bottom Problems strip.
+**Four-region shell.** App bar (40px) / left Derived views (Source, Diagram, History; 380px) /
+**centre Tree** (flexible, min 480) / **right Inspector** (360px, resizable 280–560) / bottom Problems
+strip.
 
-The brief mandates the attributes editor on the left. The correct generalisation is that the left
-panel is the **selection inspector** — everything about the selected node in one fixed place, which is
-the property beginners rely on most. Its sections, in order: identity header with validity badge →
-*What is this?* documentation → **Attributes** (required first, then set, then unset) → value editor →
-*Allowed here* content-model summary → *Problems with this node*. Sections come from a per-document-kind
-registry so XSD and Schematron swap sections in without a second layout.
+The **Inspector** holds the attributes editor and sits on the right, where this class of panel
+conventionally lives — Figma, Xcode and Sanity all put it there, and so does every IDE property
+pane. The generalisation worth holding onto is that it is the *selection inspector*, not merely an
+attributes grid: everything about the selected node in one fixed place, which is the property
+beginners rely on most. Sections, in order: identity header with validity badge → *What is this?*
+documentation → **Attributes** (required first, then set, then unset) → value editor → *Allowed here*
+content-model summary → *Problems with this node*. Sections come from a per-document-kind registry so
+XSD and Schematron swap sections in without a second layout.
+
+The read-only projections — source text, schema diagram, history — go on the left, deliberately away
+from the controls that change the document.
 
 **The Insert palette is the most important screen in the product.** A popover listing only what is
 legal at the caret, grouped in fixed order: **Required — missing (n)** with an `Add all required`
