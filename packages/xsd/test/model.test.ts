@@ -216,11 +216,14 @@ describe('substitution groups', () => {
     expect(m.substitutionMembers(q('vehicle')).map((n) => n.localName)).not.toContain('vehicle');
   });
 
-  it('offers every member where the head is referenced', () => {
-    expect(candidates(m, complexType(m, 'Fleet'), [], 0)).toEqual(['car', 'van', 'vehicle']);
+  it('offers every member where the head is referenced, but never the abstract head itself', () => {
+    // The differential harness caught this: the head is what the content model *references*, and
+    // it is exactly the one name that may not appear in a document.
+    expect(candidates(m, complexType(m, 'Fleet'), [], 0)).toEqual(['car', 'van']);
     const content = m.contentModel(complexType(m, 'Fleet'));
     if (content.kind !== 'automaton') throw new Error();
     expect(isValidSequence(content.model, [q('car'), q('van')])).toBe(true);
+    expect(isValidSequence(content.model, [q('vehicle')])).toBe(false);
   });
 
   it('refuses substitution when the head blocks it', () => {

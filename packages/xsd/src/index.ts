@@ -185,3 +185,6 @@ export type {
   SkeletonNode,
   SkeletonOptions,
 } from './query.js';
+
+export { validateDocument, isDocumentValid } from './validate.js';
+export type { DocumentProblem, ValidateOptions } from './validate.js';

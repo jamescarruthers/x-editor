@@ -31,7 +31,13 @@ interface Position {
 }
 
 type Matcher =
-  | { readonly kind: 'element'; readonly name: ElementName; readonly substitutions: readonly ElementName[] }
+  | {
+      readonly kind: 'element';
+      readonly name: ElementName;
+      readonly substitutions: readonly ElementName[];
+      /** An abstract head is never matched by its own name — only by what substitutes for it. */
+      readonly abstract: boolean;
+    }
   | {
       readonly kind: 'wildcard';
       readonly namespaceConstraint: NamespaceConstraint;
@@ -174,6 +180,7 @@ function normalize(particle: Particle, state: { count: number; approximate: bool
             kind: 'element' as const,
             name: particle.name,
             substitutions: particle.substitutions ?? [],
+            abstract: particle.abstract ?? false,
           },
         }),
         particle.occurs.min,
@@ -282,7 +289,7 @@ function detectAmbiguity(
     for (const index of targets) {
       const matcher = positions[index]!.matcher;
       if (matcher.kind === 'wildcard') continue;
-      for (const name of [matcher.name, ...matcher.substitutions]) {
+      for (const name of acceptedNames(matcher)) {
         const key = elementNameKey(name);
         if (names.has(key)) return true;
         names.add(key);
@@ -300,8 +307,13 @@ function detectAmbiguity(
 
 function matches(matcher: Matcher, name: ElementName): boolean {
   if (matcher.kind === 'wildcard') return namespaceAllowed(matcher.namespaceConstraint, name.namespaceUri);
-  if (elementNameEquals(matcher.name, name)) return true;
+  if (!matcher.abstract && elementNameEquals(matcher.name, name)) return true;
   return matcher.substitutions.some((s) => elementNameEquals(s, name));
+}
+
+/** The names a matcher accepts, which is not quite the names it is written with. */
+function acceptedNames(matcher: Extract<Matcher, { kind: 'element' }>): readonly ElementName[] {
+  return matcher.abstract ? matcher.substitutions : [matcher.name, ...matcher.substitutions];
 }
 
 function transitionsFrom(model: CompiledContentModel, state: number): ReadonlySet<number> {
@@ -384,7 +396,7 @@ export function whatCanGoHere(
 
       const matcher = model.positions[positionIndex]!.matcher;
       if (matcher.kind === 'element') {
-        for (const name of [matcher.name, ...matcher.substitutions]) {
+        for (const name of acceptedNames(matcher)) {
           const key = `e:${elementNameKey(name)}`;
           if (seen.has(key)) continue;
           seen.add(key);
@@ -508,7 +520,8 @@ export function requiredToComplete(
     for (const state of states) {
       for (const target of transitionsFrom(model, state)) {
         const matcher = model.positions[target]!.matcher;
-        if (matcher.kind === 'element') names.push(matcher.name);
+        // An abstract head cannot be the suggestion; one of its substitutes has to be.
+        if (matcher.kind === 'element') names.push(...acceptedNames(matcher));
       }
     }
 

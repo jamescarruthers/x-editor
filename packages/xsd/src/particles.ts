@@ -45,6 +45,12 @@ export type Particle =
        * makes the automaton deterministic.
        */
       readonly substitutions?: readonly ElementName[];
+      /**
+       * True when the declaration is `abstract="true"`. Such an element may be *referenced* — that
+       * is the whole point of a substitution-group head — but may never itself appear in a
+       * document, so the matcher accepts its substitutes and not its own name.
+       */
+      readonly abstract?: boolean;
     }
   | {
       readonly kind: 'wildcard';
@@ -96,12 +102,17 @@ export const p = {
   element: (
     localName: string,
     occurs: Occurs = ONCE,
-    options: { namespaceUri?: string | null; substitutions?: readonly ElementName[] } = {},
+    options: {
+      namespaceUri?: string | null;
+      substitutions?: readonly ElementName[];
+      abstract?: boolean;
+    } = {},
   ): Particle => ({
     kind: 'element',
     name: { namespaceUri: options.namespaceUri ?? null, localName },
     occurs,
     ...(options.substitutions === undefined ? {} : { substitutions: options.substitutions }),
+    ...(options.abstract === undefined ? {} : { abstract: options.abstract }),
   }),
 
   wildcard: (

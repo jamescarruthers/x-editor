@@ -31,7 +31,10 @@ function matchOnce(
     case 'element': {
       const child = children[start];
       if (child === undefined) return new Set();
-      const names = [particle.name, ...(particle.substitutions ?? [])];
+      // An abstract head is referenced but never written: only its substitutes match.
+      const names = particle.abstract === true
+        ? [...(particle.substitutions ?? [])]
+        : [particle.name, ...(particle.substitutions ?? [])];
       return names.some((n) => elementNameEquals(n, child)) ? new Set([start + 1]) : new Set();
     }
 

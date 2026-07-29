@@ -4,11 +4,12 @@ A browser-based, tree-node editor for **XML**, **XSD** and **Schematron**, with 
 validation running client-side, designed so that someone who does not already know the schema can
 still produce a valid document.
 
-**Status:** Phases 1–3 implemented. `packages/xml-core` (lossless CST, command log, splice
+**Status:** Phases 0–3 implemented. `packages/xml-core` (lossless CST, command log, splice
 serializer), `packages/xsd` (schema front end, simple- and complex-type compilers, Glushkov
 automaton, query API) and `apps/editor` (four-region shell, virtualized tree, Insert palette,
-schema-driven Inspector) are in place, at ~9,000 lines with 300 tests. Phase 4 — libxml2-wasm as the
-authoritative verdict, the `cvc-*` catalogue and quick fixes — is next. See §10 for the roadmap and
+schema-driven Inspector) are in place, at ~9,000 lines with 340 tests, and every verdict is checked
+against `libxml2-wasm` in CI. Phase 4 — libxml2 in a worker as the shipped authoritative verdict, the
+`cvc-*` catalogue and quick fixes — is next. See §10 for the roadmap and
 the per-phase *done when*.
 
 **Companion documents**
@@ -18,6 +19,7 @@ the per-phase *done when*.
 | [`docs/schema-engine.md`](docs/schema-engine.md) | The guidance core: XSD component model, content-model automaton, `whatCanGoHere`, quick fixes |
 | [`docs/validation.md`](docs/validation.md) | XSD and Schematron validation architecture, error→node mapping, the security model |
 | [`docs/ux-spec.md`](docs/ux-spec.md) | Layout, tree anatomy, the Insert palette, keyboard map, design tokens, accessibility |
+| [`docs/spikes.md`](docs/spikes.md) | Answers to SPIKE-0…4, and what the differential harness has caught |
 
 ---
 
@@ -468,9 +470,11 @@ because there is no server to send anything to.
 Each phase is independently demo-able and ends with an explicit *done when*. No calendar dates;
 phases are ordered and relatively sized.
 
-### Phase 0 — Spikes (small)
+### Phase 0 — Spikes (small) — **done, bar SPIKE-4**
 Resolve SPIKE-0…3 (§12) before the architecture is fixed.
 **Done when:** each spike has a written answer and the affected decisions are confirmed or changed.
+Answers in [`docs/spikes.md`](docs/spikes.md). SPIKE-0…3 are resolved and every affected decision
+held. SPIKE-4 (mixed content) stays open and is scheduled where the plan put it, in Phase 8.
 
 ### Phase 1 — Lossless core (medium) — **done**
 `packages/xml-core`: saxes-based CST, spans, command log with inverses, splice serializer. No UI
@@ -490,12 +494,12 @@ skeleton generation.
 **Done when:** given an unfamiliar schema, a user who has never seen it can build a valid document
 using only the palette — and the palette's answers agree with libxml2 across the differential corpus.
 
-The first half holds: the palette places each element where the content model expects it, fills in
-required attributes and children, and "Add all required" turns an invalid element into a valid one
-in one undoable step. The second half waits on Phase 4, since the oracle it compares against is the
-libxml2 binding that phase introduces. Until then the automaton is checked against the naive
-backtracking reference matcher in `packages/xsd/test/reference.ts` under fast-check, which is what
-caught the co-accessibility bug.
+Both halves hold on the corpus that exists. The palette places each element where the content model
+expects it, fills in required attributes and children, and "Add all required" turns an invalid
+element into a valid one in one undoable step. `packages/xsd/test/differential.test.ts` checks every
+verdict against `libxml2-wasm` and fails the build on a disagreement — it caught one on its first
+run (see [`docs/spikes.md`](docs/spikes.md)). What remains is *breadth*: the real corpora named in §9
+(the W3C Schema Test Collection, UBL 2.1, GML 3.2, HL7 CDA, DocBook, SEPA) are not yet vendored.
 
 ### Phase 4 — Validation and quick fixes (medium)
 libxml2-wasm in a worker, the `lineMap` error→node mapping, the `cvc-*` message catalogue, the
@@ -567,10 +571,10 @@ Mixed-content editor, XSD diagram, table view for repeated siblings, PWA/offline
 
 | ID | Question | Success criterion |
 |---|---|---|
-| **SPIKE-0** | Does *any* library expose an XSD component model with content-model particles intact? | A written survey of npm + the libxml2/Xerces public APIs concluding adopt-or-build, with evidence. Kills ~40% of the engineering budget if something is found |
-| **SPIKE-1** | Does `libxml2-wasm` report *all* validation errors with line numbers, or throw on the first? | A harness validating a document with 5 distinct errors. If first-only, switch to `xmllint-wasm`, whose CLI-shaped output lists all errors |
-| **SPIKE-2** | Can we drive multi-file schema sets through `libxml2-wasm`'s experimental import/include, or must we flatten into the virtual FS? | UBL 2.1 (many files, deep imports) validates correctly and identically to command-line `xmllint` |
-| **SPIKE-3** | Does the Glushkov automaton meet the interactive latency budget on real schemas? | `whatCanGoHere` under 16ms on UBL 2.1 and GML 3.2 content models. If not, the derivative-based alternative is the documented fallback |
+| **SPIKE-0** | Does *any* library expose an XSD component model with content-model particles intact? | **Answered: no, build it.** Survey in [`docs/spikes.md`](docs/spikes.md); the architecture stands |
+| **SPIKE-1** | Does `libxml2-wasm` report *all* validation errors with line numbers, or throw on the first? | **Answered: all of them, with line numbers; columns are always 0.** No need for `xmllint-wasm`, and the `lineMap` design is confirmed |
+| **SPIKE-2** | Can we drive multi-file schema sets through `libxml2-wasm`'s experimental import/include, or must we flatten into the virtual FS? | **Answered: they work through a registered input provider**, which is also the security boundary — libxml2 never resolves anything itself. Still to re-run on UBL 2.1 |
+| **SPIKE-3** | Does the Glushkov automaton meet the interactive latency budget on real schemas? | **Partially answered: sub-millisecond on every schema built so far.** The UBL 2.1 / GML 3.2 criterion waits on the corpus |
 | **SPIKE-4** | Mixed content: ProseMirror-with-generated-schema, or scoped CodeMirror? | A working prototype editing a DocBook `<para>` with inline `<emphasis>`, with undo and validation mapping intact |
 
 ---

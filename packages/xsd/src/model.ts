@@ -588,6 +588,7 @@ export class SchemaModel {
             name,
             occurs: element.occurs,
             substitutions: this.substitutionMembers(name),
+            abstract: global.abstract,
           };
         }
 
