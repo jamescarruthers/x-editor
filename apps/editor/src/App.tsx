@@ -76,6 +76,7 @@ export function App(): React.JSX.Element {
     [store.getSnapshot(), model],
   );
   const problemCount = store.problems.length + schemaIssues;
+  const verdict = store.verdict.state;
   const suggestedSchema = schemaName === null ? declaredSchemaLocation(doc) : null;
 
   const useExampleSchema = (): void => {
@@ -144,8 +145,33 @@ export function App(): React.JSX.Element {
             ? `${problemCount} problem${problemCount === 1 ? '' : 's'}`
             : model === null
               ? 'Well-formed'
-              : 'Matches the schema'}
+              : verdict.valid === true && !verdict.stale
+                ? 'Valid'
+                : 'Matches the schema'}
         </span>
+
+        {model !== null && (
+          // The second opinion gets its own indicator rather than being folded into the badge
+          // above: "our engine is happy" and "libxml2 is happy" are different claims, and merging
+          // them would hide exactly the disagreement worth seeing.
+          <span
+            className="text-[11px]"
+            style={{ color: 'var(--text-tertiary)', opacity: verdict.stale ? 0.6 : 1 }}
+            title="The authoritative verdict, from libxml2 in a worker"
+          >
+            {verdict.status === 'failed'
+              ? `libxml2: ${verdict.message ?? 'failed'}`
+              : verdict.status === 'compiling'
+                  ? 'libxml2: compiling…'
+                  : verdict.status === 'validating' || verdict.stale
+                    ? 'libxml2: checking…'
+                    : verdict.valid === null
+                      ? ''
+                      : verdict.valid
+                        ? 'libxml2: valid'
+                        : `libxml2: ${verdict.findings.length} error${verdict.findings.length === 1 ? '' : 's'}`}
+          </span>
+        )}
 
         <div className="flex-1" />
 

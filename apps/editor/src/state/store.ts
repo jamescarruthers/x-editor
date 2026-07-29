@@ -8,6 +8,7 @@ import {
 } from '@x-editor/xml-core';
 import type { ElementContext, SchemaDiagnostic } from '@x-editor/xsd';
 import { SchemaStore } from './schema.js';
+import { ValidationClient } from './validation.js';
 
 /**
  * The document lives outside React.
@@ -28,6 +29,8 @@ class EditorStore {
   fileName = 'untitled.xml';
   readonly schema = new SchemaStore();
   schemaProblems: readonly SchemaDiagnostic[] = [];
+  /** The second opinion, from libxml2 in a worker. See `validation.ts` for why it is separate. */
+  readonly verdict = new ValidationClient(() => this.emit());
 
   constructor(source: string, fileName: string) {
     this.doc = XmlDocument.parse(source);
@@ -65,6 +68,7 @@ class EditorStore {
 
   load(source: string, fileName: string): void {
     this.doc = XmlDocument.parse(source);
+    this.verdict.request(this.doc);
     this.fileName = fileName;
     this.expanded = new Set();
     this.selected = ROOT_ID;
@@ -74,6 +78,7 @@ class EditorStore {
 
   run(command: Command): void {
     this.doc.run(command);
+    this.verdict.request(this.doc);
     this.selected = command.affected;
     // Reveal the affected node — an edit whose result is hidden inside a collapsed parent reads as
     // nothing having happened.
@@ -98,6 +103,7 @@ class EditorStore {
    * complaint about every editor in the prior art.
    */
   private focusAfterHistory(command: Command): void {
+    this.verdict.request(this.doc);
     const target = this.doc.node(command.affected) !== undefined ? command.affected : ROOT_ID;
     this.selected = target;
     for (const ancestor of this.doc.ancestorsOf(target)) this.expanded.add(ancestor);
@@ -148,12 +154,15 @@ class EditorStore {
 
   attachSchema(fileName: string, source: string): void {
     this.schemaProblems = this.schema.attach(fileName, source);
+    this.verdict.setSchema(this.schema.sources(), fileName);
+    this.verdict.request(this.doc);
     this.emit();
   }
 
   detachSchema(): void {
     this.schema.detach();
     this.schemaProblems = [];
+    this.verdict.setSchema([], '');
     this.emit();
   }
 

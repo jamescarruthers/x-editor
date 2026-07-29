@@ -69,7 +69,9 @@ export function ProblemsPanel(): React.JSX.Element {
     [store.getSnapshot()],
   );
 
-  const total = problems.length + schemaProblems.length + documentIssues.length;
+  const verdict = store.verdict.state;
+  const total =
+    problems.length + schemaProblems.length + documentIssues.length + verdict.findings.length;
 
   if (total === 0) {
     return (
@@ -94,6 +96,25 @@ export function ProblemsPanel(): React.JSX.Element {
 
   return (
     <ul className="scroll-thin h-full overflow-auto py-1">
+      {verdict.findings.length > 0 && (
+        <li
+          className="px-3 py-1 text-[11px] font-semibold tracking-wide uppercase"
+          style={{ background: 'var(--surface-2)', color: 'var(--text-tertiary)' }}
+        >
+          From libxml2{verdict.stale && ' (checking…)'}
+        </li>
+      )}
+      {verdict.findings.map((finding, i) => (
+        <ProblemRow
+          key={`engine-${i}`}
+          severity="error"
+          message={finding.message}
+          detail={`line ${finding.line} of the validation copy`}
+          onClick={() => store.select(finding.node)}
+          dim={verdict.stale}
+        />
+      ))}
+
       {problems.map((problem, i) => (
         <ProblemRow
           key={`wf-${i}`}
@@ -199,14 +220,16 @@ function ProblemRow({
   message,
   detail,
   onClick,
+  dim,
 }: {
   severity: 'error' | 'warning';
   message: string;
   detail: string;
   onClick?: () => void;
+  dim?: boolean;
 }): React.JSX.Element {
   return (
-    <li>
+    <li style={dim === true ? { opacity: 0.55 } : undefined}>
       <button
         type="button"
         onClick={onClick}

@@ -10,4 +10,8 @@ export default defineConfig({
   base,
   plugins: [react(), tailwindcss()],
   build: { target: 'es2022', sourcemap: true },
+  // Module workers, not classic ones. libxml2-wasm initialises with a top-level await, which the
+  // default `iife` worker output cannot express — and a module worker is what the plan assumed when
+  // it picked Vite for "first-class module-worker and WASM handling".
+  worker: { format: 'es' },
 });

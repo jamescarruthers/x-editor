@@ -26,12 +26,18 @@ importers:
       '@tanstack/react-virtual':
         specifier: ^3.13.0
         version: 3.14.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@x-editor/validation-protocol':
+        specifier: workspace:*
+        version: link:../../packages/validation-protocol
       '@x-editor/xml-core':
         specifier: workspace:*
         version: link:../../packages/xml-core
       '@x-editor/xsd':
         specifier: workspace:*
         version: link:../../packages/xsd
+      '@x-editor/xsd-libxml2':
+        specifier: workspace:*
+        version: link:../../packages/xsd-libxml2
       react:
         specifier: ^19.1.0
         version: 19.2.8
@@ -61,6 +67,8 @@ importers:
         specifier: ^7.0.0
         version: 7.3.6(@types/node@26.1.2)(jiti@2.7.0)(lightningcss@1.32.0)
 
+  packages/validation-protocol: {}
+
   packages/xml-core:
     dependencies:
       saxes:
@@ -73,6 +81,15 @@ importers:
         specifier: workspace:*
         version: link:../xml-core
     devDependencies:
+      libxml2-wasm:
+        specifier: 0.7.1
+        version: 0.7.1
+
+  packages/xsd-libxml2:
+    dependencies:
+      '@x-editor/validation-protocol':
+        specifier: workspace:*
+        version: link:../validation-protocol
       libxml2-wasm:
         specifier: 0.7.1
         version: 0.7.1

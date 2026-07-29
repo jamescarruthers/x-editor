@@ -22,25 +22,30 @@ export class SchemaStore {
   /** File name of the schema the user attached, for the toolbar. */
   name: string | null = null;
 
-  private sources: Record<string, string> = {};
+  private catalogue: Record<string, string> = {};
 
   attach(fileName: string, source: string): SchemaDiagnostic[] {
-    this.sources = { ...this.sources, [fileName]: source };
+    this.catalogue = { ...this.catalogue, [fileName]: source };
     this.name = fileName;
-    this.model = new SchemaModel(assembleSchema(fileName, catalogueFrom(this.sources)));
+    this.model = new SchemaModel(assembleSchema(fileName, catalogueFrom(this.catalogue)));
     return this.model.allDiagnostics();
   }
 
   /** Adds a supporting document — one an `include` or `import` referenced — without re-rooting. */
   addSupporting(fileName: string, source: string): void {
-    this.sources = { ...this.sources, [fileName]: source };
-    if (this.name !== null) this.attach(this.name, this.sources[this.name]!);
+    this.catalogue = { ...this.catalogue, [fileName]: source };
+    if (this.name !== null) this.attach(this.name, this.catalogue[this.name]!);
+  }
+
+  /** The catalogue, for the worker. Buffers only — the worker resolves nothing itself. */
+  sources(): { uri: string; text: string }[] {
+    return Object.entries(this.catalogue).map(([uri, text]) => ({ uri, text }));
   }
 
   detach(): void {
     this.model = null;
     this.name = null;
-    this.sources = {};
+    this.catalogue = {};
   }
 
   contextFor(document: XmlDocument, id: NodeId): ElementContext | null {
