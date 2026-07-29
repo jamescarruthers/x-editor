@@ -17,12 +17,10 @@ export interface Row {
   readonly ordinal: number;
   readonly siblingCount: number;
   /**
-   * Set on a synthetic grouping row in the XSD component view. The row still addresses a real node
-   * so selecting it means something; `heading` only changes how it renders.
+   * Set on a synthetic grouping row in the XSD component view. Such a row's `id` is its own heading
+   * key rather than a node in the document — see `headingKey`.
    */
   readonly heading?: string;
-  /** A stable id for the heading's collapsed state, distinct from the node it addresses. */
-  readonly headingKey?: NodeId;
   /** The component's own name, shown instead of its element name in the component view. */
   readonly componentLabel?: string;
   /** A one-glance summary — the base type, the content shape — beside the name. */

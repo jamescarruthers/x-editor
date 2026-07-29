@@ -134,7 +134,8 @@ export function Tree(): React.JSX.Element {
         const needle = state.buffer.toLowerCase();
         for (let step = 1; step <= rows.length; step++) {
           const i = (selectedIndex + step) % rows.length;
-          if (nodeLabel(rows[i]!.node).toLowerCase().startsWith(needle)) {
+          const label = rows[i]!.heading ?? nodeLabel(rows[i]!.node);
+          if (label.toLowerCase().startsWith(needle)) {
             moveTo(i);
             return;
           }
@@ -214,6 +215,12 @@ function TreeRow({
       aria-selected={selected}
       aria-expanded={row.hasChildren ? row.expanded : undefined}
       onMouseDown={() => store.select(row.id)}
+      onClick={() => {
+        // A section header collapses its group when clicked, the way section headers do everywhere.
+        // Selecting one shows "Nothing selected" in the Inspector, which is honest — a heading is
+        // not a node — so without this the row would be inert.
+        if (row.heading !== undefined) store.toggleExpanded(row.id);
+      }}
       className="absolute inset-x-0 flex cursor-default items-center gap-1.5 pr-3 select-none"
       style={{
         height: ROW_HEIGHT,
@@ -230,7 +237,7 @@ function TreeRow({
         aria-hidden
         onClick={(e) => {
           e.stopPropagation();
-          if (row.hasChildren) store.toggleExpanded(row.headingKey ?? row.id);
+          if (row.hasChildren) store.toggleExpanded(row.id);
         }}
         className="grid size-6 shrink-0 place-items-center"
         style={{ visibility: row.hasChildren ? 'visible' : 'hidden' }}
@@ -250,18 +257,18 @@ function TreeRow({
       </button>
 
       {row.heading !== undefined ? (
+        // A section header renders as itself and nothing else. It used to fall through to the node
+        // branch below as well, printing `xs:schema` after every heading — the same label, once per
+        // group, saying nothing about the group.
         <span
           className="text-[11px] font-semibold tracking-wide uppercase"
           style={{ color: 'var(--text-tertiary)' }}
         >
           {row.heading}
         </span>
-      ) : null}
-
-      {row.heading === undefined && <NodeGlyph kind={node.kind} />}
-
-      {row.heading === undefined && node.kind === 'element' ? (
+      ) : node.kind === 'element' ? (
         <>
+          <NodeGlyph kind={node.kind} />
           {node.name.prefix !== '' && (
             <span
               className="rounded px-1 font-mono text-[11px]"
@@ -327,15 +334,18 @@ function TreeRow({
           )}
         </>
       ) : (
-        <span
-          className="truncate"
-          style={{
-            color: 'var(--text-tertiary)',
-            fontStyle: node.kind === 'comment' ? 'italic' : undefined,
-          }}
-        >
-          {inlineText(node)}
-        </span>
+        <>
+          <NodeGlyph kind={node.kind} />
+          <span
+            className="truncate"
+            style={{
+              color: 'var(--text-tertiary)',
+              fontStyle: node.kind === 'comment' ? 'italic' : undefined,
+            }}
+          >
+            {inlineText(node)}
+          </span>
+        </>
       )}
     </div>
   );
