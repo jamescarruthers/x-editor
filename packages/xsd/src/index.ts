@@ -83,3 +83,42 @@ export type { AssembledDocument, SchemaCatalogue, SchemaSet } from './assemble.j
 
 export { SymbolTable, declaredName } from './symbols.js';
 export type { GlobalComponent, SymbolSpace } from './symbols.js';
+
+export {
+  BUILT_IN_TYPES,
+  ANY_TYPE,
+  ANY_SIMPLE_TYPE,
+  applyWhiteSpace,
+  builtInAncestry,
+  builtInName,
+  builtInType,
+  compareValues,
+  isBuiltInName,
+  isOrdered,
+  lengthOf,
+  matchesLexicalSpace,
+  parseValue,
+} from './builtins.js';
+export type {
+  BuiltInType,
+  PrimitiveKind,
+  Variety,
+  WhiteSpace,
+  XsdValue,
+} from './builtins.js';
+
+export { translatePattern, sampleFor } from './xsdRegex.js';
+export type { TranslatedPattern } from './xsdRegex.js';
+
+export {
+  SimpleTypeCompiler,
+  validateSimpleValue,
+  ANY_SIMPLE_TYPE_DEF,
+} from './simpleTypes.js';
+export type {
+  Bound,
+  CompiledFacets,
+  CompiledSimpleType,
+  PatternGroup,
+  ValueProblem,
+} from './simpleTypes.js';
