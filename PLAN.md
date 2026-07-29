@@ -4,13 +4,14 @@ A browser-based, tree-node editor for **XML**, **XSD** and **Schematron**, with 
 validation running client-side, designed so that someone who does not already know the schema can
 still produce a valid document.
 
-**Status:** Phases 0–4b implemented. `packages/xml-core` (lossless CST, command log, splice
+**Status:** Phases 0–5 implemented. `packages/xml-core` (lossless CST, command log, splice
 serializer), `packages/xsd` (schema front end, simple- and complex-type compilers, Glushkov
 automaton, query API) and `apps/editor` (four-region shell, virtualized tree, Insert palette,
 schema-driven Inspector), `packages/validation-protocol` and `packages/xsd-libxml2` (the
-authoritative verdict, in a worker) are in place, with ~445 tests. Verdicts are checked against
-`libxml2-wasm` for XSD 1.0 — in CI and live in the editor — and against `xmlschema` under CPython for
-1.1. **Phase 5 — Schematron — is next**, and the XPath layer it needs is already built and tested. See §10 for the roadmap and
+authoritative verdict, in a worker) and `packages/schematron` (a direct interpreter over fontoxpath,
+with the live test harness) are in place, with ~495 tests. Every verdict is checked against an
+independent implementation: `libxml2-wasm` for XSD 1.0, `xmlschema` for 1.1, and the ISO Schematron
+reference for Schematron. **Phase 6 — XSD authoring — is next.** See §10 for the roadmap and
 the per-phase *done when*.
 
 **Companion documents**
@@ -541,11 +542,26 @@ The XPath layer is the phase's real asset: `packages/xsd/src/xpath.ts` makes the
 XPath data model through fontoxpath's `IDomFacade`, so there is no second DOM to keep in sync.
 Phase 5's Schematron interpreter and its live XPath editor both sit directly on it.
 
-### Phase 5 — Schematron (medium)
+### Phase 5 — Schematron (medium) — **done, with the oracle substituted**
 The fontoxpath interpreter (from `node-schematron`), the Schematron editor mode, the live test
 harness, SchXslt2 differential CI.
 **Done when:** a beginner can write a working rule against a sample document and see it fire, and our
 findings match SchXslt2 across the corpus.
+
+Both halves hold. Attaching a sample document to a `.sch` file gives live counts beside every
+expression — how many nodes a context matches, how many it fires on, per-assertion pass and fail
+counts, the rendered message with `sch:value-of` resolved, and a named warning when a rule is
+shadowed and never runs.
+
+**The oracle is substituted and the substitution is stated.** SchXslt2 is not on npm and vendoring a
+third-party XSLT distribution is a larger step than it looks, so `lxml.isoschematron` stands in — it
+bundles the ISO skeleton XSLT and is genuinely independent, working by compile-to-XSLT where we
+interpret. Its real limit is that libxslt is XSLT 1.0, so the corpus sticks to expressions that mean
+the same under XPath 1.0 and 3.1; `queryBinding="xslt2"` features are unchecked by it.
+
+Written from scratch rather than forked from `node-schematron`: the parts that would have been
+reused are the parts our own CST and XPath facade already provide, and what remains — first-match-
+wins claiming, the statistics, abstract-pattern expansion — is the substance of the phase.
 
 ### Phase 6 — XSD authoring (medium)
 Component tree, facets editor with live type testing, XSD regex translator, refactorings (rename with

@@ -9,6 +9,7 @@ import {
 } from '@x-editor/xml-core';
 import { store, useEditor } from '../state/store.js';
 import { describe, humanise } from '../model/describe.js';
+import { SchematronInspector } from './SchematronSections.js';
 import {
   AllowedHere,
   ProblemsWithThisNode,
@@ -41,6 +42,9 @@ export function Inspector({
   const model = store.schema.model;
   const context = node.kind === 'element' ? store.contextFor(id) : null;
   const description = describe(doc, id);
+  // Schematron mode replaces the attributes-first layout entirely: the document is shallow and all
+  // the difficulty is in two attributes, so a generic grid would bury the only thing that matters.
+  const schematronMode = store.schematron.active;
 
   return (
     <div className="scroll-thin flex h-full flex-col overflow-y-auto">
@@ -94,6 +98,8 @@ export function Inspector({
           />
         </Section>
       )}
+
+      {schematronMode && <SchematronInspector />}
 
       {model !== null && context !== null && (
         <ProblemsWithThisNode context={context} model={model} />

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.0",
+    "@x-editor/schematron": "workspace:*",
     "@x-editor/validation-protocol": "workspace:*",
     "@x-editor/xml-core": "workspace:*",
     "@x-editor/xsd": "workspace:*",

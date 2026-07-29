@@ -108,3 +108,66 @@ export const EXAMPLE_SCHEMA = `<?xml version="1.0" encoding="UTF-8"?>
 
 </xs:schema>
 `;
+
+/**
+ * Example Schematron rules for the same purchase order.
+ *
+ * Deliberately shows what Schematron is *for* and XSD is not: co-occurrence rules across siblings,
+ * arithmetic over a list, and messages written by someone who knows the domain. The last pattern
+ * contains a deliberately shadowed rule, because first-match-wins is the thing beginners trip over
+ * and the harness exists to make it visible.
+ */
+export const EXAMPLE_RULES_NAME = 'purchase-order.sch';
+
+export const EXAMPLE_RULES = `<?xml version="1.0" encoding="UTF-8"?>
+<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">
+  <sch:title>Purchase order business rules</sch:title>
+
+  <sch:pattern id="quantities">
+    <sch:rule context="item">
+      <sch:assert test="quantity > 0" diagnostics="quantity-help">
+        <sch:name/> "<sch:value-of select="productName"/>" has a quantity of
+        <sch:value-of select="quantity"/>, which must be at least 1.
+      </sch:assert>
+      <sch:report test="quantity > 10" role="warning">
+        "<sch:value-of select="productName"/>" is an unusually large order of
+        <sch:value-of select="quantity"/>.
+      </sch:report>
+    </sch:rule>
+  </sch:pattern>
+
+  <sch:pattern id="addresses">
+    <sch:rule context="shipTo | billTo">
+      <sch:assert test="postcode">
+        A <sch:name/> address needs a postcode.
+      </sch:assert>
+      <sch:assert test="not(@country = 'GB') or matches(postcode, '^[A-Z]{1,2}[0-9]')">
+        A GB address needs a UK-shaped postcode; this one is
+        "<sch:value-of select="postcode"/>".
+      </sch:assert>
+    </sch:rule>
+  </sch:pattern>
+
+  <sch:pattern id="ordering">
+    <sch:rule id="all-items" context="item">
+      <sch:assert test="price >= 0">
+        A price cannot be negative.
+      </sch:assert>
+    </sch:rule>
+    <!-- This rule never runs. Every <item> is claimed by "all-items" above, and only the first
+         matching rule in a pattern fires for a given node — so the more specific rule written
+         second is dead. It is here on purpose: the Inspector says so, which is the point. -->
+    <sch:rule id="expensive-items" context="item[price > 100]">
+      <sch:assert test="comment">
+        An item over 100 needs a comment explaining it.
+      </sch:assert>
+    </sch:rule>
+  </sch:pattern>
+
+  <sch:diagnostics>
+    <sch:diagnostic id="quantity-help">
+      Set the quantity to the number of units being ordered. Zero means the line should be removed.
+    </sch:diagnostic>
+  </sch:diagnostics>
+</sch:schema>
+`;

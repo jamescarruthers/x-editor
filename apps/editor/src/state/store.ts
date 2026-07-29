@@ -9,6 +9,7 @@ import {
 import { loadXPath, type ElementContext, type SchemaDiagnostic } from '@x-editor/xsd';
 import { SchemaStore } from './schema.js';
 import { ValidationClient } from './validation.js';
+import { SchematronStore } from './schematron.js';
 
 /**
  * The document lives outside React.
@@ -31,6 +32,8 @@ class EditorStore {
   schemaProblems: readonly SchemaDiagnostic[] = [];
   /** The second opinion, from libxml2 in a worker. See `validation.ts` for why it is separate. */
   readonly verdict = new ValidationClient(() => this.emit());
+  /** Schematron mode: the schema being edited, and the sample document it is tried against. */
+  readonly schematron = new SchematronStore();
 
   constructor(source: string, fileName: string) {
     this.doc = XmlDocument.parse(source);
@@ -69,6 +72,7 @@ class EditorStore {
   load(source: string, fileName: string): void {
     this.doc = XmlDocument.parse(source);
     this.verdict.request(this.doc);
+    this.schematron.refresh(this.doc);
     this.fileName = fileName;
     this.expanded = new Set();
     this.selected = ROOT_ID;
@@ -79,6 +83,7 @@ class EditorStore {
   run(command: Command): void {
     this.doc.run(command);
     this.verdict.request(this.doc);
+    this.schematron.refresh(this.doc);
     this.selected = command.affected;
     // Reveal the affected node — an edit whose result is hidden inside a collapsed parent reads as
     // nothing having happened.
@@ -104,6 +109,7 @@ class EditorStore {
    */
   private focusAfterHistory(command: Command): void {
     this.verdict.request(this.doc);
+    this.schematron.refresh(this.doc);
     const target = this.doc.node(command.affected) !== undefined ? command.affected : ROOT_ID;
     this.selected = target;
     for (const ancestor of this.doc.ancestorsOf(target)) this.expanded.add(ancestor);
@@ -180,6 +186,11 @@ class EditorStore {
    * proportional to depth rather than document size — cheap enough that a cache would cost more in
    * staleness bugs than it saves.
    */
+  attachSample(source: string, name: string): void {
+    this.schematron.setSample(source, name);
+    this.emit();
+  }
+
   contextFor(id: NodeId): ElementContext | null {
     return this.schema.contextFor(this.doc, id);
   }

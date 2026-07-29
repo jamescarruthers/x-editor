@@ -29,6 +29,9 @@ importers:
       '@tanstack/react-virtual':
         specifier: ^3.13.0
         version: 3.14.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@x-editor/schematron':
+        specifier: workspace:*
+        version: link:../../packages/schematron
       '@x-editor/validation-protocol':
         specifier: workspace:*
         version: link:../../packages/validation-protocol

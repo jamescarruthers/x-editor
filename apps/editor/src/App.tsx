@@ -19,6 +19,7 @@ export function App(): React.JSX.Element {
   const [announcement, setAnnounce] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
   const schemaInput = useRef<HTMLInputElement>(null);
+  const sampleInput = useRef<HTMLInputElement>(null);
 
   const announce = useCallback((message: string) => setAnnounce(message), []);
 
@@ -175,6 +176,23 @@ export function App(): React.JSX.Element {
 
         <div className="flex-1" />
 
+        {store.schematron.active && (
+          // Schematron mode. The rules cannot be tried without something to try them against, so
+          // attaching a sample document is the first thing the toolbar offers.
+          <ToolbarButton
+            onClick={() => sampleInput.current?.click()}
+            title={
+              store.schematron.sampleName === null
+                ? 'Attach an XML document to try these rules against'
+                : `Trying rules against ${store.schematron.sampleName}`
+            }
+          >
+            {store.schematron.sampleName === null
+              ? 'Attach sample'
+              : `Sample: ${store.schematron.sampleName}`}
+          </ToolbarButton>
+        )}
+
         {schemaName === null ? (
           <ToolbarButton onClick={() => schemaInput.current?.click()}>Attach schema</ToolbarButton>
         ) : (
@@ -203,6 +221,22 @@ export function App(): React.JSX.Element {
         </ToolbarButton>
         <ToolbarButton onClick={() => fileInput.current?.click()}>Open</ToolbarButton>
         <ToolbarButton onClick={save}>Save</ToolbarButton>
+        <input
+          ref={sampleInput}
+          type="file"
+          accept=".xml,text/xml,application/xml"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file !== undefined) {
+              void file.text().then((text) => {
+                store.attachSample(text, file.name);
+                announce(`Trying the rules against ${file.name}.`);
+              });
+            }
+            e.target.value = '';
+          }}
+        />
         <input
           ref={schemaInput}
           type="file"
@@ -261,7 +295,7 @@ export function App(): React.JSX.Element {
         </aside>
 
         <main className="flex min-w-0 flex-1 flex-col">
-          {schemaName === null && (
+          {schemaName === null && !store.schematron.active && (
             <div
               className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]"
               style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-2)' }}
@@ -276,6 +310,24 @@ export function App(): React.JSX.Element {
                 style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
               >
                 Try the example schema
+              </button>
+            </div>
+          )}
+          {store.schematron.active && store.schematron.sampleName === null && (
+            <div
+              className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]"
+              style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-2)' }}
+            >
+              <span style={{ color: 'var(--text-secondary)' }}>
+                This is a Schematron schema. Attach a sample document to see which rules fire.
+              </span>
+              <button
+                type="button"
+                onClick={() => sampleInput.current?.click()}
+                className="ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[11px]"
+                style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
+              >
+                Attach a sample document
               </button>
             </div>
           )}
