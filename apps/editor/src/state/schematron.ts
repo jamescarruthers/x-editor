@@ -11,65 +11,73 @@ import {
 } from '@x-editor/schematron';
 
 /**
- * Schematron mode, and its live test harness.
+ * Schematron rules, and the document they are run against.
  *
  * The harness is the point. A Schematron rule is a piece of XPath whose effect you cannot see by
  * reading it — "does this context match anything?" and "does this assert ever fire?" are the two
  * questions every author has, and neither is answerable without running the rules against a real
- * document. Binding the schema being edited to a sample instance and showing the counts live is
- * what turns Schematron from an expert-only format into something a beginner can iterate on.
+ * document.
  *
- * The sample instance is a second document held beside the one being edited. It is never modified.
+ * Rules and sample are set **separately**, from two different workspace files. An earlier version
+ * derived the rules from whichever document was being edited, which made the harness work only
+ * while a `.sch` was in front of you — an XML author with rules open alongside got no findings at
+ * all, and the bundled example built to demonstrate a failing business rule demonstrated nothing.
+ * Keeping the two inputs independent is what makes rules apply to the document rather than to the
+ * editor's current focus.
+ *
+ * The sample is never modified.
  */
 export class SchematronStore {
-  /** The parsed schema, when the open document is Schematron. */
+  /** The parsed rules, from the `.sch` file in the workspace. */
   schema: SchSchema | null = null;
   problems: readonly SchDiagnostic[] = [];
 
-  /** The document the rules are being tried against. */
+  /** The document the rules are tried against — the `.xml` file in the workspace. */
   sample: XmlDocument | null = null;
   sampleName: string | null = null;
 
   result: SchematronResult | null = null;
 
-  /** True when the open document is a Schematron schema. */
+  /** The source the rules were last parsed from, so an unrelated edit does not reparse. */
+  private rulesSource: string | null = null;
+
+  /** True when there are rules to run. */
   get active(): boolean {
     return this.schema !== null;
   }
 
   /**
-   * Re-read the schema from the document being edited.
+   * Re-read the rules.
    *
-   * Called on every edit. Parsing is cheap — Schematron documents are small and shallow — so there
-   * is no incremental path to get wrong.
+   * Guarded on the serialized source rather than reparsing unconditionally: this is called on every
+   * edit to any file in the workspace, and reparsing a `.sch` because someone typed in the `.xml`
+   * would be work for nothing. Parsing is otherwise cheap — Schematron documents are small and
+   * shallow — so there is no incremental path to get wrong beyond this guard.
    */
-  refresh(document: XmlDocument): void {
-    if (!isSchematronDocument(document)) {
+  setRules(document: XmlDocument | null): void {
+    if (document === null || !isSchematronDocument(document)) {
       this.schema = null;
       this.problems = [];
+      this.rulesSource = null;
       this.result = null;
       return;
     }
 
+    const source = document.serialize();
+    if (source === this.rulesSource) return;
+    this.rulesSource = source;
+
     const parsed = parseSchematron(document);
     this.schema = parsed.schema;
     this.problems = parsed.problems;
-    this.run();
   }
 
-  setSample(source: string, name: string): void {
-    this.sample = XmlDocument.parse(source);
+  setSample(document: XmlDocument | null, name: string | null): void {
+    this.sample = document;
     this.sampleName = name;
-    // The rules cannot run without XPath, and a Schematron author has certainly reached the point
-    // of needing it — so this is where the engine is fetched.
-    void loadXPath().then(() => this.run());
-    this.run();
-  }
-
-  clearSample(): void {
-    this.sample = null;
-    this.sampleName = null;
-    this.result = null;
+    // The rules cannot run without XPath, and a workspace holding a `.sch` has certainly reached the
+    // point of needing it — so this is where the engine is fetched.
+    if (document !== null && this.schema !== null) void loadXPath().then(() => this.run());
   }
 
   run(): void {
@@ -83,16 +91,6 @@ export class SchematronStore {
   /** What a rule did, found by the node it was written at. */
   statisticsForRule(node: NodeId) {
     return this.result?.statistics.find((entry) => entry.origin === node) ?? null;
-  }
-
-  /** What one assert or report did, found by the node it was written at. */
-  statisticsForAssertion(node: NodeId, ruleNode: NodeId) {
-    const rule = this.statisticsForRule(ruleNode);
-    if (rule === null) return null;
-    const findings = this.result?.findings.filter((finding) => finding.origin === node) ?? [];
-    // Matched by position within the rule, since the statistics carry the assertion's id and test
-    // rather than its node.
-    return { rule, findings };
   }
 }
 

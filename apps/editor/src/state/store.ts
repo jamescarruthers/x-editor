@@ -9,8 +9,9 @@ import {
 import { loadXPath, type ElementContext, type SchemaDiagnostic } from '@x-editor/xsd';
 import { SchemaStore } from './schema.js';
 import { ValidationClient } from './validation.js';
-import { SchematronStore } from './schematron.js';
+import { SchematronStore, isSchematronDocument } from './schematron.js';
 import { isSchemaDocument } from '../model/componentTree.js';
+import { NEW_SCH, NEW_XML, NEW_XSD } from './templates.js';
 import {
   nextPlaceholder,
   pendingPlaceholders,
@@ -20,70 +21,84 @@ import {
 } from '../model/scaffold.js';
 
 /**
+ * A workspace of up to three files — the instance, its schema, and its business rules.
+ *
+ * The three are one job. A schema exists to constrain a document; rules exist to constrain it
+ * further; and the interesting errors are the ones that only appear when you look at more than one
+ * of them at a time. Holding them separately — attach a schema *file*, edit a schema *document* —
+ * meant the editor could never show that: an XML author had rules they could not run, and a rule
+ * author had a sample they could not edit.
+ *
+ * So there is one slot per kind, at most one file each, and every edit to any of them re-derives
+ * everything downstream. The slot a file lands in is decided by its root element, not its
+ * extension, because a `.txt` full of `xs:schema` is still a schema and a `.xsd` full of nonsense
+ * is not.
+ */
+export type FileKind = 'xml' | 'xsd' | 'sch';
+
+export const FILE_KINDS: readonly FileKind[] = ['xml', 'xsd', 'sch'];
+
+export const FILE_LABELS: Readonly<Record<FileKind, string>> = {
+  xml: 'XML',
+  xsd: 'XSD',
+  sch: 'Rules',
+};
+
+/**
+ * One open file.
+ *
+ * Selection and expansion live here rather than on the store, so switching tabs returns you to
+ * where you were. A workspace that forgets your position every time you check the schema is one you
+ * stop checking the schema in.
+ */
+interface WorkspaceFile {
+  readonly kind: FileKind;
+  name: string;
+  doc: XmlDocument;
+  selected: NodeId;
+  expanded: Set<NodeId>;
+  componentView: boolean;
+  placeholders: readonly Placeholder[];
+}
+
+/**
  * The document lives outside React.
  *
  * It is a mutable graph with stable node ids — deliberately, because selection, expansion state and
- * (later) validation diagnostics are all keyed by those ids and must survive edits elsewhere in the
- * tree. Cloning it into React state on every keystroke would defeat that and would not scale to the
+ * validation diagnostics are all keyed by those ids and must survive edits elsewhere in the tree.
+ * Cloning it into React state on every keystroke would defeat that and would not scale to the
  * 50k-node target. Instead React subscribes through `useSyncExternalStore` and re-reads on a version
  * bump.
  */
 class EditorStore {
-  private doc: XmlDocument;
+  private slots = new Map<FileKind, WorkspaceFile>();
   private version = 0;
   private listeners = new Set<() => void>();
 
-  selected: NodeId = ROOT_ID;
-  expanded = new Set<NodeId>();
-  fileName = 'untitled.xml';
+  active: FileKind = 'xml';
+
   readonly schema = new SchemaStore();
   schemaProblems: readonly SchemaDiagnostic[] = [];
   /** The second opinion, from libxml2 in a worker. See `validation.ts` for why it is separate. */
   readonly verdict = new ValidationClient(() => this.emit());
-  /** Schematron mode: the schema being edited, and the sample document it is tried against. */
+  /** The rules from the `.sch` slot, run against the `.xml` slot. */
   readonly schematron = new SchematronStore();
 
+  /** The XSD source the guidance engine was last compiled from, so typing elsewhere is free. */
+  private compiledFrom: string | null = null;
   /**
-   * XSD mode shows the component view by default.
-   *
-   * A schema's source order is an accident of how it was written; its component structure is what
-   * the author thinks in. Both address the same nodes, so the toggle costs nothing to keep in step.
+   * Recompiling libxml2's schema means terminating and respawning the worker, so it is debounced
+   * separately and much harder than the in-process engine. Editing a schema live is worth the cost;
+   * paying it on every keystroke is not.
    */
-  componentView = false;
-
-  /**
-   * The values the scaffolder invented, and what it invented them as.
-   *
-   * A generated document is valid and meaningless; this is what turns that into a to-do list. Held
-   * as the generated values rather than as a "needs review" flag, so whether one has been reviewed
-   * is answered by comparing against the document — which is exact, survives undo, and needs no
-   * hook in the edit path to keep in step.
-   */
-  placeholders: readonly Placeholder[] = [];
+  private engineTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(source: string, fileName: string) {
-    this.doc = XmlDocument.parse(source);
-    this.fileName = fileName;
-    this.expandInitial();
+    this.openFile(fileName, source, { silent: true });
+    this.active = 'xml';
   }
 
-  setComponentView(on: boolean): void {
-    if (this.componentView === on) return;
-    this.componentView = on;
-    this.emit();
-  }
-
-  private expandInitial(): void {
-    // Open the document element and its immediate children, so the first screen is never a single
-    // collapsed row.
-    this.expanded.add(ROOT_ID);
-    const root = this.doc.documentElement();
-    if (root !== undefined) {
-      this.expanded.add(root);
-      this.selected = root;
-      for (const child of this.doc.childrenOf(root)) this.expanded.add(child);
-    }
-  }
+  // --- subscription ------------------------------------------------------
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -97,76 +112,242 @@ class EditorStore {
     for (const listener of this.listeners) listener();
   }
 
-  get document(): XmlDocument {
-    return this.doc;
+  // --- the active file ---------------------------------------------------
+
+  /**
+   * The file the tree and Inspector are editing.
+   *
+   * Every existing component reads `store.document`, `store.selected` and so on, and continues to —
+   * the accessors below are the whole of the multi-file change as far as they are concerned.
+   */
+  private get current(): WorkspaceFile {
+    const file = this.slots.get(this.active);
+    if (file !== undefined) return file;
+    // The active slot can only be empty if a file was closed, in which case another is chosen
+    // immediately. This is a belt-and-braces path so a render can never see a missing document.
+    const first = [...this.slots.values()][0];
+    if (first === undefined) throw new Error('The workspace has no files');
+    this.active = first.kind;
+    return first;
   }
 
-  load(source: string, fileName: string): void {
-    this.doc = XmlDocument.parse(source);
-    this.verdict.request(this.doc);
-    this.schematron.refresh(this.doc);
-    this.fileName = fileName;
-    this.expanded = new Set();
-    this.selected = ROOT_ID;
-    this.placeholders = [];
-    // A schema opens in the component view, an instance in the literal one.
-    this.componentView = isSchemaDocument(this.doc);
-    this.expandInitial();
+  get document(): XmlDocument {
+    return this.current.doc;
+  }
+
+  get fileName(): string {
+    return this.current.name;
+  }
+
+  get selected(): NodeId {
+    return this.current.selected;
+  }
+
+  set selected(id: NodeId) {
+    this.current.selected = id;
+  }
+
+  get expanded(): Set<NodeId> {
+    return this.current.expanded;
+  }
+
+  get componentView(): boolean {
+    return this.current.componentView;
+  }
+
+  get placeholders(): readonly Placeholder[] {
+    return this.current.placeholders;
+  }
+
+  setComponentView(on: boolean): void {
+    if (this.current.componentView === on) return;
+    this.current.componentView = on;
+    this.emit();
+  }
+
+  // --- the workspace -----------------------------------------------------
+
+  /** The files that are open, in a fixed order so the tabs never reshuffle. */
+  get openFiles(): readonly { kind: FileKind; name: string }[] {
+    return FILE_KINDS.filter((kind) => this.slots.has(kind)).map((kind) => ({
+      kind,
+      name: this.slots.get(kind)!.name,
+    }));
+  }
+
+  has(kind: FileKind): boolean {
+    return this.slots.has(kind);
+  }
+
+  documentFor(kind: FileKind): XmlDocument | null {
+    return this.slots.get(kind)?.doc ?? null;
+  }
+
+  nameFor(kind: FileKind): string | null {
+    return this.slots.get(kind)?.name ?? null;
+  }
+
+  activate(kind: FileKind): void {
+    if (!this.slots.has(kind) || this.active === kind) return;
+    this.active = kind;
     this.emit();
   }
 
   /**
-   * Load a document the wizard generated, keeping track of what it invented.
+   * Which slot a source belongs in, decided by its root element.
    *
-   * Separate from `load` because the placeholder paths are only meaningful against the text that
-   * produced them — resolving them anywhere else would bind them to whatever happens to sit at
-   * those indices.
+   * By content rather than by extension, because the extension is a claim and the root element is a
+   * fact — and someone who has been handed `rules.xml` should not have to rename it before the
+   * editor will run it.
    */
-  loadScaffold(scaffold: Scaffold, fileName: string): void {
-    this.load(scaffold.source, fileName);
-    this.placeholders = resolvePlaceholders(this.doc, scaffold.placeholders);
-    const first = this.pending[0];
-    if (first !== undefined) {
-      this.selected = first.node;
-      for (const ancestor of this.doc.ancestorsOf(first.node)) this.expanded.add(ancestor);
+  static kindOf(document: XmlDocument): FileKind {
+    if (isSchemaDocument(document)) return 'xsd';
+    if (isSchematronDocument(document)) return 'sch';
+    return 'xml';
+  }
+
+  /**
+   * @param options.focus Whether to switch to the file. False when a schema arrives *because of*
+   * the document being edited — yanking someone into a schema they did not ask to look at is the
+   * behaviour that made "attach" and "open" feel like different things in the first place.
+   */
+  openFile(
+    fileName: string,
+    source: string,
+    options: { silent?: boolean; focus?: boolean } = {},
+  ): FileKind {
+    const doc = XmlDocument.parse(source);
+    const kind = EditorStore.kindOf(doc);
+
+    const file: WorkspaceFile = {
+      kind,
+      name: fileName,
+      doc,
+      selected: ROOT_ID,
+      expanded: new Set(),
+      // A schema opens in the component view, an instance in the literal one.
+      componentView: kind === 'xsd',
+      placeholders: [],
+    };
+    this.slots.set(kind, file);
+    if (options.focus !== false) this.active = kind;
+    expandInitial(file);
+
+    this.sync();
+    if (options.silent !== true) this.emit();
+    return kind;
+  }
+
+  /** Start a file of a given kind from a template. */
+  newFile(kind: FileKind): void {
+    const [name, source] =
+      kind === 'xsd'
+        ? ['untitled.xsd', NEW_XSD]
+        : kind === 'sch'
+          ? ['untitled.sch', NEW_SCH]
+          : ['untitled.xml', NEW_XML];
+    this.openFile(name, source);
+  }
+
+  closeFile(kind: FileKind): void {
+    if (!this.slots.has(kind)) return;
+    if (this.slots.size === 1) return; // never leave the workspace empty
+    this.slots.delete(kind);
+    if (this.active === kind) this.active = [...this.slots.keys()][0]!;
+    this.sync();
+    this.emit();
+  }
+
+  /** Replaces the whole workspace — what the start screen's examples do. */
+  openWorkspace(files: readonly { name: string; source: string }[], active: FileKind = 'xml'): void {
+    this.slots.clear();
+    this.compiledFrom = null;
+    this.schema.detach();
+    for (const file of files) this.openFile(file.name, file.source, { silent: true });
+    if (this.slots.has(active)) this.active = active;
+    this.sync();
+    this.emit();
+  }
+
+  // --- cross-file derivation ---------------------------------------------
+
+  /**
+   * Re-derive everything that depends on more than one file.
+   *
+   * Called after every edit and every workspace change. The guidance engine recompiles in-process
+   * and is cheap enough to do synchronously; libxml2's schema and the Schematron run are the
+   * expensive halves and are guarded or debounced.
+   */
+  private sync(): void {
+    const xsd = this.slots.get('xsd');
+    const xml = this.slots.get('xml');
+    const sch = this.slots.get('sch');
+
+    if (xsd === undefined) {
+      if (this.compiledFrom !== null) {
+        this.compiledFrom = null;
+        this.schema.detach();
+        this.schemaProblems = [];
+        this.verdict.setSchema([], '');
+      }
+    } else {
+      const source = xsd.doc.serialize();
+      if (source !== this.compiledFrom) {
+        this.compiledFrom = source;
+        // The guidance engine is in-process and lazy, so this is affordable per keystroke — and it
+        // is what makes editing a schema show up in the other file immediately.
+        this.schemaProblems = this.schema.attach(xsd.name, source);
+        if (this.schema.needsXPath) void loadXPath().then(() => this.emit());
+        this.scheduleEngineRecompile(xsd.name);
+      }
     }
-    this.emit();
+
+    this.schematron.setRules(sch?.doc ?? null);
+    this.schematron.setSample(xml?.doc ?? null, xml?.name ?? null);
+    this.schematron.run();
+
+    if (xml !== undefined) this.verdict.request(xml.doc);
   }
 
-  /** The generated values nobody has looked at yet. */
-  get pending(): readonly Placeholder[] {
-    return pendingPlaceholders(this.doc, this.placeholders);
+  /**
+   * Hand the schema to libxml2, debounced.
+   *
+   * `setSchema` terminates and respawns the worker — the only way to interrupt a WASM call — so
+   * doing it per keystroke while someone edits a schema would spend the whole session starting
+   * workers. Half a second is long enough that a burst of typing costs one respawn and short enough
+   * that the authoritative verdict still feels like it is keeping up.
+   */
+  private scheduleEngineRecompile(rootUri: string): void {
+    if (this.engineTimer !== null) clearTimeout(this.engineTimer);
+    this.engineTimer = setTimeout(() => {
+      this.engineTimer = null;
+      this.verdict.setSchema(this.schema.sources(), rootUri);
+      const xml = this.slots.get('xml');
+      if (xml !== undefined) this.verdict.request(xml.doc);
+    }, 500);
   }
 
-  /** Steps to the next unreviewed generated value. Bound to F7 / Shift+F7. */
-  stepPlaceholder(direction: 1 | -1): boolean {
-    const target = nextPlaceholder(this.doc, this.placeholders, this.selected, direction);
-    if (target === null) return false;
-    this.selected = target;
-    for (const ancestor of this.doc.ancestorsOf(target)) this.expanded.add(ancestor);
-    this.emit();
-    return true;
-  }
+  // --- editing -----------------------------------------------------------
 
   run(command: Command): void {
-    this.doc.run(command);
-    this.verdict.request(this.doc);
-    this.schematron.refresh(this.doc);
-    this.selected = command.affected;
+    const file = this.current;
+    file.doc.run(command);
+    file.selected = command.affected;
     // Reveal the affected node — an edit whose result is hidden inside a collapsed parent reads as
     // nothing having happened.
-    for (const ancestor of this.doc.ancestorsOf(command.affected)) this.expanded.add(ancestor);
+    for (const ancestor of file.doc.ancestorsOf(command.affected)) file.expanded.add(ancestor);
+    this.sync();
     this.emit();
   }
 
   undo(): void {
-    const command = this.doc.undo();
+    const command = this.current.doc.undo();
     if (command === undefined) return;
     this.focusAfterHistory(command);
   }
 
   redo(): void {
-    const command = this.doc.redo();
+    const command = this.current.doc.redo();
     if (command === undefined) return;
     this.focusAfterHistory(command);
   }
@@ -176,95 +357,150 @@ class EditorStore {
    * complaint about every editor in the prior art.
    */
   private focusAfterHistory(command: Command): void {
-    this.verdict.request(this.doc);
-    this.schematron.refresh(this.doc);
-    const target = this.doc.node(command.affected) !== undefined ? command.affected : ROOT_ID;
-    this.selected = target;
-    for (const ancestor of this.doc.ancestorsOf(target)) this.expanded.add(ancestor);
+    const file = this.current;
+    const target = file.doc.node(command.affected) !== undefined ? command.affected : ROOT_ID;
+    file.selected = target;
+    for (const ancestor of file.doc.ancestorsOf(target)) file.expanded.add(ancestor);
+    this.sync();
     this.emit();
   }
 
   select(id: NodeId): void {
-    if (this.selected === id) return;
-    this.selected = id;
+    if (this.current.selected === id) return;
+    this.current.selected = id;
+    this.emit();
+  }
+
+  /** Selects a node in another file, switching to it. What a cross-file problem row does. */
+  reveal(kind: FileKind, id: NodeId): void {
+    const file = this.slots.get(kind);
+    if (file === undefined) return;
+    this.active = kind;
+    file.selected = id;
+    for (const ancestor of file.doc.ancestorsOf(id)) file.expanded.add(ancestor);
     this.emit();
   }
 
   toggleExpanded(id: NodeId): void {
-    if (this.expanded.has(id)) this.expanded.delete(id);
-    else this.expanded.add(id);
+    const { expanded } = this.current;
+    if (expanded.has(id)) expanded.delete(id);
+    else expanded.add(id);
     this.emit();
   }
 
   setExpanded(id: NodeId, open: boolean): void {
-    const had = this.expanded.has(id);
-    if (had === open) return;
-    if (open) this.expanded.add(id);
-    else this.expanded.delete(id);
+    const { expanded } = this.current;
+    if (expanded.has(id) === open) return;
+    if (open) expanded.add(id);
+    else expanded.delete(id);
     this.emit();
   }
 
   expandAll(): void {
+    const file = this.current;
     const walk = (id: NodeId): void => {
-      this.expanded.add(id);
-      for (const child of this.doc.childrenOf(id)) walk(child);
+      file.expanded.add(id);
+      for (const child of file.doc.childrenOf(id)) walk(child);
     };
     walk(ROOT_ID);
     this.emit();
   }
 
   collapseAll(): void {
-    this.expanded = new Set([ROOT_ID]);
-    const root = this.doc.documentElement();
-    if (root !== undefined) this.expanded.add(root);
+    const file = this.current;
+    file.expanded = new Set([ROOT_ID]);
+    const root = file.doc.documentElement();
+    if (root !== undefined) file.expanded.add(root);
     this.emit();
   }
 
   get problems(): readonly ParseError[] {
-    return this.doc.parseErrors;
+    return this.current.doc.parseErrors;
+  }
+
+  // --- generated documents -----------------------------------------------
+
+  /**
+   * Load a document the wizard generated, keeping track of what it invented.
+   *
+   * Separate from `openFile` because the placeholder paths are only meaningful against the text that
+   * produced them — resolving them anywhere else would bind them to whatever happens to sit at those
+   * indices.
+   */
+  loadScaffold(scaffold: Scaffold, fileName: string): void {
+    this.openFile(fileName, scaffold.source, { silent: true });
+    const file = this.slots.get('xml');
+    if (file !== undefined) {
+      file.placeholders = resolvePlaceholders(file.doc, scaffold.placeholders);
+      const first = pendingPlaceholders(file.doc, file.placeholders)[0];
+      if (first !== undefined) {
+        file.selected = first.node;
+        for (const ancestor of file.doc.ancestorsOf(first.node)) file.expanded.add(ancestor);
+      }
+    }
+    this.emit();
+  }
+
+  /** The generated values nobody has looked at yet, in the active file. */
+  get pending(): readonly Placeholder[] {
+    return pendingPlaceholders(this.current.doc, this.current.placeholders);
+  }
+
+  /** Steps to the next unreviewed generated value. Bound to F7 / Shift+F7. */
+  stepPlaceholder(direction: 1 | -1): boolean {
+    const file = this.current;
+    const target = nextPlaceholder(file.doc, file.placeholders, file.selected, direction);
+    if (target === null) return false;
+    file.selected = target;
+    for (const ancestor of file.doc.ancestorsOf(target)) file.expanded.add(ancestor);
+    this.emit();
+    return true;
   }
 
   // --- schema ------------------------------------------------------------
 
+  /**
+   * Attaching a schema *is* opening it.
+   *
+   * They were two mechanisms doing one thing, and keeping them apart is what stopped the editor
+   * showing an error that spans two files. Supporting documents an `include` reaches for stay a
+   * separate catalogue, because they are not being edited.
+   */
   attachSchema(
     fileName: string,
     source: string,
     supporting: Readonly<Record<string, string>> = {},
   ): void {
-    this.schemaProblems = this.schema.attach(fileName, source, supporting);
-    this.verdict.setSchema(this.schema.sources(), fileName);
-    this.verdict.request(this.doc);
-    this.emit();
-
-    // A 1.1 schema needs XPath to check its assertions. Fetching it here rather than at startup is
-    // why a 1.0 user never downloads it; re-emitting afterwards is what makes the assertions appear
-    // once it lands, instead of staying invisible until the next edit.
-    if (this.schema.needsXPath) {
-      void loadXPath().then(() => this.emit());
-    }
+    for (const [name, text] of Object.entries(supporting)) this.schema.addSupporting(name, text);
+    this.openFile(fileName, source, { focus: false });
   }
 
   detachSchema(): void {
-    this.schema.detach();
-    this.schemaProblems = [];
-    this.verdict.setSchema([], '');
-    this.emit();
+    this.closeFile('xsd');
   }
 
-  /**
-   * The schema context for a node, recomputed rather than cached.
-   *
-   * Caching would need invalidating on every edit that changes an ancestor's shape, and the walk is
-   * proportional to depth rather than document size — cheap enough that a cache would cost more in
-   * staleness bugs than it saves.
-   */
+  /** Opening an XML document to try the rules against. */
   attachSample(source: string, name: string): void {
-    this.schematron.setSample(source, name);
-    this.emit();
+    this.openFile(name, source, { focus: false });
   }
 
   contextFor(id: NodeId): ElementContext | null {
-    return this.schema.contextFor(this.doc, id);
+    // Guidance is about the instance document; asking for it inside a schema would answer against
+    // the schema-for-schemas, which nobody attached and nobody wants to see.
+    if (this.active !== 'xml') return null;
+    return this.schema.contextFor(this.current.doc, id);
+  }
+}
+
+function expandInitial(file: WorkspaceFile): void {
+  // Open the document element and its immediate children, so the first screen is never a single
+  // collapsed row.
+  file.expanded.add(ROOT_ID);
+  const root = file.doc.documentElement();
+  if (root !== undefined) {
+    file.expanded.add(root);
+    file.selected = root;
+    for (const child of file.doc.childrenOf(root)) file.expanded.add(child);
   }
 }
 

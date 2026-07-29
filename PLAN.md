@@ -4,17 +4,18 @@ A browser-based, tree-node editor for **XML**, **XSD** and **Schematron**, with 
 validation running client-side, designed so that someone who does not already know the schema can
 still produce a valid document.
 
-**Status:** Phases 0–7 implemented. `packages/xml-core` (lossless CST, command log, splice
+**Status:** Phases 0–8 implemented, on a three-file workspace. `packages/xml-core` (lossless CST, command log, splice
 serializer), `packages/xsd` (schema front end, simple- and complex-type compilers, Glushkov
 automaton, query API) and `apps/editor` (four-region shell, virtualized tree, Insert palette,
 schema-driven Inspector, XSD component view and refactorings, form view, new-document wizard, smart
-paste, schema inference), `packages/validation-protocol` and `packages/xsd-libxml2` (the
+paste, schema inference, mixed-content flow rows, table view), `packages/validation-protocol` and `packages/xsd-libxml2` (the
 authoritative verdict, in a worker) and `packages/schematron` (a direct interpreter over fontoxpath,
-with the live test harness) are in place, with ~550 tests. Every verdict is checked against an
+with the live test harness) are in place, with ~600 tests. Every verdict is checked against an
 independent implementation: `libxml2-wasm` for XSD 1.0, `xmlschema` for 1.1, and the ISO Schematron
 reference for Schematron. All five spikes are answered — see [`docs/spikes.md`](docs/spikes.md).
 **Phase 8 is ongoing**; its two risk-carrying items (mixed content, the table view) are done, and
-what remains there is listed honestly in §10. See §10 for the roadmap and the per-phase *done when*.
+what remains there is listed honestly in §10. See §10 for the roadmap and the per-phase *done when*,
+and §6.1 for the workspace.
 
 **Companion documents**
 
@@ -365,6 +366,53 @@ decision answer "which side of the toggle?", or beginner scaffolding accretes un
 for everyone.
 
 ---
+
+### 6.1 The workspace — three files, one job
+
+The instance, its schema and its rules are one piece of work, and the errors worth the most are the
+ones that only exist between them: a document that stopped being valid because of something typed in
+the schema two tabs ago, or a business rule that fires on a document nobody can edit from here.
+
+An earlier design had these as three separate mechanisms — *attach* a schema, *edit* a schema,
+*attach a sample* to rules — and it could not express any of that. Worse, it had a silent hole: the
+Schematron rules were parsed from whichever document was being edited, so an XML author with rules
+open alongside got no findings at all, and the bundled example built to demonstrate a failing
+business rule opened green and demonstrated nothing. The engine was right the whole time; only the
+wiring was missing, and a test that called `runSchematron` directly could not see it.
+
+So there is **one slot per kind**, at most one file each:
+
+| Slot | Holds | Feeds |
+|---|---|---|
+| `xml` | the instance | the guidance engine, libxml2, and the Schematron sample |
+| `xsd` | the schema | the guidance engine's model, and libxml2's compiled schema |
+| `sch` | the rules | the Schematron interpreter |
+
+**A file is filed by its root element, not its extension.** The extension is a claim; the root
+element is a fact, and somebody handed `rules.xml` should not have to rename it before the editor
+will run it.
+
+**Attaching a schema is opening it.** They were two mechanisms doing one thing, and keeping them
+apart is precisely what stopped the editor showing an error that spans two files. What survives from
+"attach" is only that it does not steal focus: a schema arriving *because of* the document you are
+editing should not yank you into it.
+
+Every edit to any slot re-derives everything downstream, with the costs separated by how expensive
+they are. The guidance engine recompiles in-process and synchronously, which is what makes editing a
+schema show up in the document immediately. libxml2's schema is **debounced at 500 ms**, because
+`setSchema` terminates and respawns the worker — the only way to interrupt a WASM call — and doing
+that per keystroke would spend the session starting workers. The Schematron rules are guarded on
+their serialized source, so typing in the XML does not reparse the `.sch`.
+
+Findings are attributed to the file they belong in, and that attribution is the feature rather than
+bookkeeping. A failing assert belongs to the **XML** — that is the document that is wrong. A rule
+whose XPath does not evaluate belongs to the **`.sch`** — that is the author's mistake, and filing it
+against the XML would send someone editing a document they have not broken. A dangling `type=`
+belongs to the **XSD** even though it is invariably noticed in the XML.
+
+The tab chips carry live per-file counts for the same reason: a red **2** on the XSD chip while you
+are working in the XML is the whole point of holding them together, and a count you have to click to
+find is a count nobody sees.
 
 ## 7. The three document kinds
 

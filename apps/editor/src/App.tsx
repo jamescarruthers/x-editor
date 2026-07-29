@@ -6,7 +6,7 @@ import { Inspector } from './components/Inspector.js';
 import { ExplainPanel, HistoryPanel, ProblemsPanel, SourcePanel } from './components/Panels.js';
 import { InsertPaletteHost } from './components/InsertPalette.js';
 import { declaredSchemaLocation } from './state/schema.js';
-import { documentProblems } from './model/problems.js';
+import { workspaceProblems } from './model/workspaceProblems.js';
 import { isSchemaDocument } from './model/componentTree.js';
 import { EXAMPLE_SCHEMA, EXAMPLE_SCHEMA_NAME } from './examples/purchaseOrder.js';
 import { StartScreen } from './components/StartScreen.js';
@@ -14,6 +14,7 @@ import { FormView } from './components/FormView.js';
 import { PasteSheetHost } from './components/PasteSheet.js';
 import { TableView } from './components/TableView.js';
 import { CoachMarks } from './components/CoachMarks.js';
+import { FileTabs } from './components/FileTabs.js';
 import { tableFor } from './model/table.js';
 
 type RightTab = 'source' | 'history' | 'explain';
@@ -31,7 +32,6 @@ export function App(): React.JSX.Element {
   const [tableView, setTableView] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const schemaInput = useRef<HTMLInputElement>(null);
-  const sampleInput = useRef<HTMLInputElement>(null);
 
   const announce = useCallback((message: string) => setAnnounce(message), []);
 
@@ -89,18 +89,18 @@ export function App(): React.JSX.Element {
   }, [announce]);
 
   const doc = store.document;
-  const schemaName = store.schema.name;
   const model = store.schema.model;
 
   // The badge counts what the guidance engine can see as well as well-formedness. It is explicitly
   // not the authoritative verdict — libxml2 arrives in Phase 4 — so the label says "matches the
   // schema", not "valid".
-  const schemaIssues = useMemo(
-    () => (model === null ? 0 : documentProblems(model, doc).filter((p) => p.severity === 'error').length),
+  // Counted across the whole workspace, not just the file in front of you. A schema you broke two
+  // tabs ago is still broken, and a badge that goes green when you switch tabs is a lie.
+  const problemCount = useMemo(
+    () => workspaceProblems().filter((problem) => problem.severity === 'error').length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store.getSnapshot(), model],
+    [store.getSnapshot()],
   );
-  const problemCount = store.problems.length + schemaIssues;
   const pending = store.pending.length;
   // The table is offered against whichever ancestor actually holds a list, so selecting a cell's
   // element does not make the button disappear from under the user.
@@ -115,7 +115,7 @@ export function App(): React.JSX.Element {
     [store.getSnapshot()],
   );
   const verdict = store.verdict.state;
-  const suggestedSchema = schemaName === null ? declaredSchemaLocation(doc) : null;
+  const suggestedSchema = store.has('xsd') ? null : declaredSchemaLocation(doc);
 
   const useExampleSchema = (): void => {
     store.attachSchema(EXAMPLE_SCHEMA_NAME, EXAMPLE_SCHEMA);
@@ -143,7 +143,7 @@ export function App(): React.JSX.Element {
 
   const openFile = (file: File): void => {
     void file.text().then((text) => {
-      store.load(text, file.name);
+      store.openFile(file.name, text);
       setStartOpen(false);
       announce(`Opened ${file.name}.`);
     });
@@ -175,9 +175,7 @@ export function App(): React.JSX.Element {
         style={{ borderColor: 'var(--border-default)', background: 'var(--surface-2)' }}
       >
         <span className="font-semibold">x-editor</span>
-        <span className="truncate text-[12px]" style={{ color: 'var(--text-tertiary)' }}>
-          {store.fileName}
-        </span>
+        <FileTabs />
 
         <span
           data-coach="validity"
@@ -235,23 +233,6 @@ export function App(): React.JSX.Element {
 
         <div className="flex-1" />
 
-        {store.schematron.active && (
-          // Schematron mode. The rules cannot be tried without something to try them against, so
-          // attaching a sample document is the first thing the toolbar offers.
-          <ToolbarButton
-            onClick={() => sampleInput.current?.click()}
-            title={
-              store.schematron.sampleName === null
-                ? 'Attach an XML document to try these rules against'
-                : `Trying rules against ${store.schematron.sampleName}`
-            }
-          >
-            {store.schematron.sampleName === null
-              ? 'Attach sample'
-              : `Sample: ${store.schematron.sampleName}`}
-          </ToolbarButton>
-        )}
-
         {tableParent !== null && !isSchemaDocument(doc) && (
           // Offered only where there is actually a list. A grid button that produces an empty grid
           // teaches someone the feature does not work.
@@ -295,13 +276,6 @@ export function App(): React.JSX.Element {
           </ToolbarButton>
         )}
 
-        {schemaName === null ? (
-          <ToolbarButton onClick={() => schemaInput.current?.click()}>Attach schema</ToolbarButton>
-        ) : (
-          <ToolbarButton onClick={() => store.detachSchema()} title={`Attached: ${schemaName}`}>
-            Schema: {schemaName}
-          </ToolbarButton>
-        )}
         <ToolbarButton
           coach="insert"
           onClick={() => setPaletteOpen(true)}
@@ -324,22 +298,6 @@ export function App(): React.JSX.Element {
         </ToolbarButton>
         <ToolbarButton onClick={() => fileInput.current?.click()}>Open</ToolbarButton>
         <ToolbarButton onClick={save}>Save</ToolbarButton>
-        <input
-          ref={sampleInput}
-          type="file"
-          accept=".xml,text/xml,application/xml"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file !== undefined) {
-              void file.text().then((text) => {
-                store.attachSample(text, file.name);
-                announce(`Trying the rules against ${file.name}.`);
-              });
-            }
-            e.target.value = '';
-          }}
-        />
         <input
           ref={schemaInput}
           type="file"
@@ -432,39 +390,51 @@ export function App(): React.JSX.Element {
               </button>
             </div>
           )}
-          {schemaName === null && !store.schematron.active && !isSchemaDocument(doc) && (
+          {!store.has('xsd') && store.active === 'xml' && (
             <div
               className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]"
               style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-2)' }}
             >
               <span style={{ color: 'var(--text-secondary)' }}>
-                No schema attached, so anything is allowed here.
+                No schema in this workspace, so anything is allowed here.
               </span>
+              <button
+                type="button"
+                onClick={() => {
+                  store.newFile('xsd');
+                  announce('Started a new schema.');
+                }}
+                className="ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[11px]"
+                style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
+              >
+                Start one
+              </button>
               <button
                 type="button"
                 onClick={useExampleSchema}
-                className="ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[11px]"
+                className="shrink-0 rounded border px-1.5 py-0.5 text-[11px]"
                 style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
               >
-                Try the example schema
+                Try the example
               </button>
             </div>
           )}
-          {store.schematron.active && store.schematron.sampleName === null && (
+          {store.active === 'sch' && !store.has('xml') && (
             <div
               className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]"
               style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-2)' }}
             >
               <span style={{ color: 'var(--text-secondary)' }}>
-                This is a Schematron schema. Attach a sample document to see which rules fire.
+                These rules have nothing to run against. Open an XML file and the counts appear
+                beside every expression.
               </span>
               <button
                 type="button"
-                onClick={() => sampleInput.current?.click()}
+                onClick={() => fileInput.current?.click()}
                 className="ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[11px]"
                 style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
               >
-                Attach a sample document
+                Open an XML file
               </button>
             </div>
           )}

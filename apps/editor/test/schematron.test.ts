@@ -32,9 +32,15 @@ const SAMPLE = `<?xml version="1.0" encoding="UTF-8"?>
 </purchaseOrder>
 `;
 
+/** The workspace the harness needs: rules in one slot, the document they run against in another. */
 function open(): void {
-  store.load(EXAMPLE_RULES, EXAMPLE_RULES_NAME);
-  store.attachSample(SAMPLE, 'purchase-order.xml');
+  store.openWorkspace(
+    [
+      { name: 'purchase-order.xml', source: SAMPLE },
+      { name: EXAMPLE_RULES_NAME, source: EXAMPLE_RULES },
+    ],
+    'sch',
+  );
 }
 
 /** Every node with a given Schematron role, in document order. */
@@ -115,8 +121,20 @@ describe('Schematron mode', () => {
     expect(store.schematron.result!.findings.length).toBeLessThan(before);
   });
 
-  it('does not treat an ordinary XML document as Schematron', () => {
-    store.load(SAMPLE, 'purchase-order.xml');
-    expect(store.schematron.active).toBe(false);
+  it('files a document by its root element, not its extension', () => {
+    // Opening the sample does not disturb the rules — that separation is the whole point of the
+    // workspace, and it is what lets a finding cross from one file to the other.
+    store.openFile('rules-but-misnamed.xml', SAMPLE);
+    expect(store.active).toBe('xml');
+    expect(store.schematron.active).toBe(true);
+    expect(store.nameFor('sch')).toBe(EXAMPLE_RULES_NAME);
+  });
+
+  it('runs the rules against the XML file rather than against whatever is in front of you', () => {
+    // The bug this replaced: rules were parsed from the *edited* document, so an XML author with
+    // rules open alongside got no findings at all.
+    store.activate('xml');
+    expect(store.schematron.active).toBe(true);
+    expect(store.schematron.result!.findings.length).toBeGreaterThan(0);
   });
 });

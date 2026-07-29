@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
-import { store, useEditor } from '../state/store.js';
+import { store, useEditor, FILE_LABELS } from '../state/store.js';
 import { documentProblems } from '../model/problems.js';
 import { applyFix } from '../model/fixes.js';
 import type { Diagnostic } from '@x-editor/xsd';
 import { explainDocument } from '../model/explain.js';
 import { inferSchema, type InferenceResult } from '../model/infer.js';
+import { workspaceProblems } from '../model/workspaceProblems.js';
 
 /** The serialized document, live. Proof the splice serializer is preserving what it should. */
 export function SourcePanel(): React.JSX.Element {
@@ -89,7 +90,7 @@ export function ExplainPanel(): React.JSX.Element {
                 </button>
                 <button
                   type="button"
-                  onClick={() => store.load(inferred.source, 'inferred.xsd')}
+                  onClick={() => store.openFile('inferred.xsd', inferred.source)}
                   className="rounded border px-2 py-1 text-[12px]"
                   style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
                 >
@@ -177,21 +178,31 @@ export function HistoryPanel(): React.JSX.Element {
  */
 export function ProblemsPanel(): React.JSX.Element {
   useEditor();
-  const problems = store.problems;
-  const schemaProblems = store.schemaProblems;
 
-  const documentIssues = useMemo(
+  const problems = useMemo(
+    () => workspaceProblems(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.getSnapshot()],
+  );
+
+  // Only the active file's schema diagnostics carry quick fixes, so they are listed separately and
+  // in full rather than flattened into the cross-file list — a row you can act on and a row you can
+  // only navigate to are different things and should not look the same.
+  const fixable = useMemo(
     () =>
-      store.schema.model === null ? [] : documentProblems(store.schema.model, store.document),
+      store.active === 'xml' && store.schema.model !== null
+        ? documentProblems(store.schema.model, store.document)
+        : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [store.getSnapshot()],
   );
 
   const verdict = store.verdict.state;
-  const total =
-    problems.length + schemaProblems.length + documentIssues.length + verdict.findings.length;
+  const elsewhere = problems.filter(
+    (problem) => problem.file !== store.active || problem.source !== 'schema',
+  );
 
-  if (total === 0) {
+  if (problems.length === 0) {
     return (
       <div className="flex items-center gap-2 px-3 py-2">
         <svg width="14" height="14" viewBox="0 0 14 14" style={{ color: 'var(--ok)' }} aria-hidden>
@@ -204,9 +215,9 @@ export function ProblemsPanel(): React.JSX.Element {
           />
         </svg>
         <span style={{ color: 'var(--text-secondary)' }}>
-          {store.schema.model === null
-            ? 'No problems. This document is well-formed.'
-            : 'No problems. This document is well-formed and matches the schema.'}
+          {store.has('xsd')
+            ? `No problems across ${store.openFiles.length} ${store.openFiles.length === 1 ? 'file' : 'files'}.`
+            : 'No problems. This document is well-formed.'}
         </span>
       </div>
     );
@@ -214,45 +225,37 @@ export function ProblemsPanel(): React.JSX.Element {
 
   return (
     <ul className="scroll-thin h-full overflow-auto py-1">
-      {verdict.findings.length > 0 && (
+      {fixable.length > 0 && (
         <li
           className="px-3 py-1 text-[11px] font-semibold tracking-wide uppercase"
           style={{ background: 'var(--surface-2)', color: 'var(--text-tertiary)' }}
         >
-          From libxml2{verdict.stale && ' (checking…)'}
+          In {store.fileName} — with fixes
         </li>
       )}
-      {verdict.findings.map((finding, i) => (
-        <ProblemRow
-          key={`engine-${i}`}
-          severity="error"
-          message={finding.message}
-          detail={`line ${finding.line} of the validation copy`}
-          onClick={() => store.select(finding.node)}
-          dim={verdict.stale}
-        />
+      {fixable.map((diagnostic, i) => (
+        <DiagnosticRow key={`doc-${i}`} diagnostic={diagnostic} />
       ))}
 
-      {problems.map((problem, i) => (
+      {elsewhere.length > 0 && (
+        <li
+          className="px-3 py-1 text-[11px] font-semibold tracking-wide uppercase"
+          style={{ background: 'var(--surface-2)', color: 'var(--text-tertiary)' }}
+        >
+          Across the workspace{verdict.stale && ' (checking…)'}
+        </li>
+      )}
+      {elsewhere.map((problem, i) => (
         <ProblemRow
-          key={`wf-${i}`}
-          severity="error"
-          message={problem.message}
-          detail={`character ${problem.offset} · ${problem.code}`}
-        />
-      ))}
-
-      {schemaProblems.map((problem, i) => (
-        <ProblemRow
-          key={`schema-${i}`}
+          key={`ws-${i}`}
           severity={problem.severity}
           message={problem.message}
-          detail={`in the schema · ${problem.origin.documentUri} · ${problem.code}`}
+          // The file is on every row, because the whole point of holding three together is that the
+          // cause of a problem is often not in the file you are looking at.
+          detail={`${FILE_LABELS[problem.file]} · ${store.nameFor(problem.file) ?? ''} · ${problem.source}`}
+          onClick={() => store.reveal(problem.file, problem.node)}
+          dim={problem.source === 'libxml2' && verdict.stale}
         />
-      ))}
-
-      {documentIssues.map((diagnostic, i) => (
-        <DiagnosticRow key={`doc-${i}`} diagnostic={diagnostic} />
       ))}
     </ul>
   );
