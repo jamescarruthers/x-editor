@@ -103,6 +103,29 @@ export class XmlDocument {
     return out;
   }
 
+  /**
+   * Prefix → URI bindings in scope at a node, nearest declaration winning.
+   *
+   * Element and attribute *names* are resolved once at parse time, but QNames written inside
+   * attribute *values* — `type="xs:string"`, `ref="tns:Address"`, a Schematron `@context` — can only
+   * be resolved by whoever understands the vocabulary, and they resolve against the bindings in
+   * scope where they are written. The empty-string key is the default namespace.
+   */
+  inScopeNamespaces(id: NodeId): Map<string, string> {
+    const chain = [id, ...this.ancestorsOf(id)].reverse();
+    const bindings = new Map<string, string>();
+    for (const nodeId of chain) {
+      const node = this.nodeMap.get(nodeId);
+      if (node === undefined || node.kind !== 'element') continue;
+      for (const declaration of node.namespaceDeclarations) {
+        // An empty URI undeclares the prefix (XML Namespaces 1.0 allows this for the default).
+        if (declaration.uri === '') bindings.delete(declaration.prefix);
+        else bindings.set(declaration.prefix, declaration.uri);
+      }
+    }
+    return bindings;
+  }
+
   serialize(): string {
     return serializeNode({ source: this.source, nodes: this.nodeMap }, ROOT_ID);
   }
