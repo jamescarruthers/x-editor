@@ -68,6 +68,27 @@ const NAME_START =
 const NAME_CHAR =
   /[A-Za-z0-9_:.·À-ÖØ-öø-˿̀-ͯͰ-ͽͿ-῿‌-‍‿-⁀⁰-↏Ⰰ-⿯、-퟿豈-﷏ﷰ-�-]/;
 
+/**
+ * Whether a string is a well-formed XML `Name`.
+ *
+ * Lives here, beside the character classes the tokenizer scans with, because the two must agree: a
+ * name this accepts but `readName` would stop short of produces a document that does not re-parse
+ * as what was written. Anything that lets a user type a name — renaming an element, adding an
+ * attribute — has to ask first, since a command is applied to the tree directly and there is no
+ * later stage that would catch `<my element>`.
+ *
+ * This is `Name`, not `QName`: a colon is a legal name character, so `a:b:c` passes here and is a
+ * namespace question rather than a well-formedness one.
+ */
+export function isValidName(value: string): boolean {
+  if (value === '') return false;
+  if (!NAME_START.test(value[0]!)) return false;
+  for (let i = 1; i < value.length; i++) {
+    if (!NAME_CHAR.test(value[i]!)) return false;
+  }
+  return true;
+}
+
 function isWhitespace(ch: string): boolean {
   return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
 }

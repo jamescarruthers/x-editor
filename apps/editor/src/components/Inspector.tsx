@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import {
+  isValidName,
   qnameToString,
   removeAttribute,
+  renameElement,
   setAttribute,
   setTextValue,
   type NodeId,
@@ -59,9 +61,11 @@ export function Inspector({
         style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-1)' }}
       >
         <div className="flex items-center gap-2">
-          <span className="truncate text-[15px] font-semibold">
-            {node.kind === 'element' ? qnameToString(node.name) : node.kind}
-          </span>
+          {node.kind === 'element' ? (
+            <ElementName id={id} name={node.name} />
+          ) : (
+            <span className="truncate text-[15px] font-semibold">{node.kind}</span>
+          )}
         </div>
         {node.kind === 'element' && (
           <div className="mt-0.5 text-[12px]" style={{ color: 'var(--text-tertiary)' }}>
@@ -129,6 +133,113 @@ export function Inspector({
       )}
     </div>
   );
+}
+
+/**
+ * The element's name, editable in place.
+ *
+ * It reads as a heading and behaves as one until you click it, because that is where everyone looks
+ * for the name — and before this the only way to reach `renameElement` was a quick fix the schema
+ * offered when it recognised a near-miss. Renaming was therefore possible exactly when the editor
+ * thought you had made a typo, and impossible when you had simply changed your mind; the workaround
+ * was delete-and-reinsert, which throws the children away.
+ *
+ * Offered on the instance document only. In a schema the element name is structure — `xs:complexType`
+ * is not a thing anyone means to rename — and the name an author wants there is the `name=`
+ * attribute, which the XSD Inspector already edits with reference rewriting behind it. Editing this
+ * field instead would silently produce a schema that no longer declares what it used to.
+ *
+ * While you type, a name that will not work is shown in red with the reason on the field — that is
+ * where the feedback is useful, because it arrives before you commit to it. Committing one anyway
+ * reverts to the current name rather than leaving the bad text in place: the field is a statement
+ * about what the element *is* called, and the alternative is a heading that disagrees with the
+ * document until someone notices.
+ */
+function ElementName({ id, name }: { id: NodeId; name: QName }): React.JSX.Element {
+  const current = qnameToString(name);
+  const [draft, setDraft] = useState(current);
+  const [editing, setEditing] = useState(false);
+
+  // The tag name in a schema or a rules file is structure rather than content — see above.
+  if (store.active !== 'xml') {
+    return <span className="truncate text-[15px] font-semibold">{current}</span>;
+  }
+
+  const trimmed = draft.trim();
+  const scope = store.document.inScopeNamespaces(id);
+  const problem = trimmed === current ? null : nameProblem(trimmed, scope);
+
+  const commit = (): void => {
+    setEditing(false);
+    if (trimmed === current || problem !== null) {
+      setDraft(current);
+      return;
+    }
+
+    const colon = trimmed.indexOf(':');
+    const prefix = colon === -1 ? '' : trimmed.slice(0, colon);
+    const localName = colon === -1 ? trimmed : trimmed.slice(colon + 1);
+    // A prefix means whatever it is bound to *here*, so it resolves against the bindings in scope at
+    // this element. `nameProblem` has already refused an unbound one, so this lookup cannot miss.
+    const namespaceUri = colon === -1 ? (scope.get('') ?? null) : scope.get(prefix)!;
+
+    store.run(renameElement(store.document, id, { prefix, localName, namespaceUri }));
+  };
+
+  return (
+    <input
+      value={editing ? draft : current}
+      onFocus={() => {
+        setDraft(current);
+        setEditing(true);
+      }}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+        if (event.key === 'Escape') {
+          setDraft(current);
+          setEditing(false);
+          event.currentTarget.blur();
+        }
+      }}
+      aria-label="Element name"
+      aria-invalid={editing && problem !== null}
+      title={editing && problem !== null ? problem : 'Rename this element'}
+      spellCheck={false}
+      className="min-w-0 flex-1 truncate rounded border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold focus:outline-none"
+      style={{
+        color: editing && problem !== null ? 'var(--error)' : 'var(--text-primary)',
+        borderColor: editing && problem !== null ? 'var(--error)' : undefined,
+      }}
+    />
+  );
+}
+
+/**
+ * Why a typed name cannot be used, or null when it can.
+ *
+ * Two questions, not one. Well-formedness — would `<name>` parse as one element with that name —
+ * and namespaces: a colon is a legal name character, so `x:thing` is a perfectly good XML `Name`
+ * while `x` may mean nothing here. Writing an unbound prefix produces a document that no longer
+ * parses, so this refuses rather than guessing a namespace, on the same grounds the schema
+ * refactorings refuse to invent reference text they cannot write correctly.
+ */
+export function nameProblem(candidate: string, scope: ReadonlyMap<string, string>): string | null {
+  if (candidate === '') return 'A name cannot be empty.';
+  if (!isValidName(candidate)) return `"${candidate}" is not a valid XML name.`;
+
+  const colon = candidate.indexOf(':');
+  if (colon === -1) return null;
+
+  const prefix = candidate.slice(0, colon);
+  const localName = candidate.slice(colon + 1);
+  if (localName.includes(':')) return 'A name may have at most one colon in it.';
+  if (localName === '') return 'A prefix needs a name after the colon.';
+  if (!scope.has(prefix)) {
+    return `The prefix "${prefix}" is not declared here, so this name would not parse.`;
+  }
+  return null;
 }
 
 function Attributes({ id }: { id: NodeId }): React.JSX.Element {

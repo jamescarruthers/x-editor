@@ -1,4 +1,4 @@
-export { tokenize } from './tokenizer.js';
+export { tokenize, isValidName } from './tokenizer.js';
 export type { Token, RawAttribute, TokenizeResult, TokenizerError, Span } from './tokenizer.js';
 
 export { buildTree, XML_NS, XMLNS_NS } from './parse.js';
