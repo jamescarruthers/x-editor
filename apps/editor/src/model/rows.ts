@@ -5,6 +5,7 @@ import {
   type XmlDocument,
   type XmlNode,
 } from '@x-editor/xml-core';
+import { flowPreview } from './mixed.js';
 
 export interface Row {
   readonly id: NodeId;
@@ -26,6 +27,16 @@ export interface Row {
   readonly componentLabel?: string;
   /** A one-glance summary — the base type, the content shape — beside the name. */
   readonly componentDetail?: string;
+  /**
+   * Set on a mixed-content element, whose inline flow is rendered on this row rather than exploded
+   * into a row per run.
+   *
+   * This is the answer to the plan's third-biggest risk: `<p>See <emph>this</emph> for details.</p>`
+   * as five rows is unreadable, and it is the shape of every DocBook, DITA, TEI and JATS document.
+   * The children are still reachable — the row expands like any other — but nothing forces a reader
+   * through them to get at a paragraph.
+   */
+  readonly flow?: string;
 }
 
 /**
@@ -35,7 +46,12 @@ export interface Row {
  * rendering a row for every indentation run would triple the tree's length and teach a beginner
  * nothing. Significant text — anything with a non-space character — always gets a row.
  */
-export function buildRows(doc: XmlDocument, expanded: ReadonlySet<NodeId>): Row[] {
+export function buildRows(
+  doc: XmlDocument,
+  expanded: ReadonlySet<NodeId>,
+  /** Identifies mixed-content elements. Passed in because rows know nothing about the schema. */
+  isFlow: (id: NodeId) => boolean = () => false,
+): Row[] {
   const rows: Row[] = [];
 
   const visibleChildren = (parent: NodeId): NodeId[] =>
@@ -73,6 +89,7 @@ export function buildRows(doc: XmlDocument, expanded: ReadonlySet<NodeId>): Row[
 
       const kids = visibleChildren(id);
       const isExpanded = expanded.has(id);
+      const flow = node.kind === 'element' && kids.length > 0 && isFlow(id);
       rows.push({
         id,
         depth,
@@ -81,6 +98,7 @@ export function buildRows(doc: XmlDocument, expanded: ReadonlySet<NodeId>): Row[
         expanded: isExpanded,
         ordinal,
         siblingCount,
+        ...(flow ? { flow: flowPreview(doc, id) } : {}),
       });
       if (isExpanded && kids.length > 0) walk(id, depth + 1);
     }

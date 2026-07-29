@@ -4,8 +4,7 @@
 Each answer states what was actually run, so a later reader can tell a measurement from an opinion.
 
 Phase 0's *done when* is "each spike has a written answer and the affected decisions are confirmed
-or changed". SPIKE-0 through SPIKE-3 are answered below. SPIKE-4 (mixed content) remains open and is
-scheduled where the plan put it, in Phase 8.
+or changed". All five spikes are answered below.
 
 ---
 
@@ -116,13 +115,34 @@ derivative-based matcher — remains available and untouched.
 
 ## SPIKE-4 — Mixed content: ProseMirror with a generated schema, or scoped CodeMirror?
 
-**Open.** Scheduled for Phase 8, as the plan has it.
+**Answered: neither, and the reason is worth more than the answer.**
 
-Nothing built so far forecloses either option: mixed content is modelled correctly all the way
-through (`contentKind: 'mixed'`, and the differential harness has a passing mixed-content case), and
-what remains undecided is purely how to *edit* it. The risk the plan identifies is real and
-unchanged — a row per node turns `<p>See <emph>this</emph> for details.</p>` into five rows, which is
-unusable, and that is the entire DocBook/DITA/TEI/JATS world.
+The risk the plan identifies is real and was confirmed exactly as written: a row per node turns
+`<p>See <emph>this</emph> for details.</p>` into five rows, and that is the entire
+DocBook/DITA/TEI/JATS world. A test now asserts the fix rather than the problem.
+
+But the spike asked the wrong question, and running it made that visible. Both candidate answers are
+*editors* — and the unusable part was never the editing, it was the **display**. Five rows is
+unreadable before anyone types anything. So the change that mattered is that a mixed element is now
+**one tree row carrying its flow**, with marked-up runs shown as `⟨…⟩` rather than stripped, so it is
+never a surprise that half a sentence is tagged. The children stay reachable; nothing forces a reader
+through them to get at a paragraph.
+
+Editing is then a much smaller problem, and it is answered with a **scoped source snippet** — the
+element's inner XML in a textarea, with the schema's permitted inline elements as wrap buttons, and
+nothing committed until it parses. Refusing a broken commit matters more here than anywhere else in
+the editor: the alternative is discarding a paragraph someone was midway through typing.
+
+**Why not ProseMirror.** It is the richer editor, and it costs ~150 KB in the entry chunk plus a
+second document model to keep in step with the CST — the exact two-representations problem this
+codebase is arranged around, bought for a minority of documents. §11 risk 4 has already fired once in
+this project for less. If a WYSIWYG flow surface is wanted later, the seam is `FlowEditor` and
+nothing else has to move: `flowSource` and `setFlow` are the whole interface between the flow and the
+document.
+
+**What is given up.** WYSIWYG. Someone editing a 200-paragraph DITA topic all day wants the richer
+surface, and this is not it. What is kept: one model, no silent reformatting, and every flow edit is
+an ordinary command in the same undo history as everything else.
 
 ---
 

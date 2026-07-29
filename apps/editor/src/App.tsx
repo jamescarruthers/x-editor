@@ -12,6 +12,8 @@ import { EXAMPLE_SCHEMA, EXAMPLE_SCHEMA_NAME } from './examples/purchaseOrder.js
 import { StartScreen } from './components/StartScreen.js';
 import { FormView } from './components/FormView.js';
 import { PasteSheetHost } from './components/PasteSheet.js';
+import { TableView } from './components/TableView.js';
+import { tableFor } from './model/table.js';
 
 type RightTab = 'source' | 'history' | 'explain';
 
@@ -25,6 +27,7 @@ export function App(): React.JSX.Element {
   // screen that will not stay dismissed is worse than one that never appears.
   const [startOpen, setStartOpen] = useState(true);
   const [formView, setFormView] = useState(false);
+  const [tableView, setTableView] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const schemaInput = useRef<HTMLInputElement>(null);
   const sampleInput = useRef<HTMLInputElement>(null);
@@ -98,6 +101,18 @@ export function App(): React.JSX.Element {
   );
   const problemCount = store.problems.length + schemaIssues;
   const pending = store.pending.length;
+  // The table is offered against whichever ancestor actually holds a list, so selecting a cell's
+  // element does not make the button disappear from under the user.
+  const tableParent = useMemo(
+    () => {
+      for (const id of [store.selected, ...doc.ancestorsOf(store.selected)]) {
+        if (tableFor(doc, store.schema.model, id) !== null) return id;
+      }
+      return null;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.getSnapshot()],
+  );
   const verdict = store.verdict.state;
   const suggestedSchema = schemaName === null ? declaredSchemaLocation(doc) : null;
 
@@ -235,11 +250,28 @@ export function App(): React.JSX.Element {
           </ToolbarButton>
         )}
 
+        {tableParent !== null && !isSchemaDocument(doc) && (
+          // Offered only where there is actually a list. A grid button that produces an empty grid
+          // teaches someone the feature does not work.
+          <ToolbarButton
+            onClick={() => {
+              setTableView((value) => !value);
+              setFormView(false);
+            }}
+            title="Show the repeated elements here as a grid"
+          >
+            {tableView ? 'Tree' : 'Table'}
+          </ToolbarButton>
+        )}
+
         {model !== null && !isSchemaDocument(doc) && (
           // Available only with a schema, because a form is built from one. Offering the toggle
           // without would be a button that explains why it does nothing.
           <ToolbarButton
-            onClick={() => setFormView((value) => !value)}
+            onClick={() => {
+              setFormView((value) => !value);
+              setTableView(false);
+            }}
             title="Fill this document in as a labelled form (Ctrl+Shift+E)"
           >
             {formView ? 'Tree' : 'Form'}
@@ -456,7 +488,16 @@ export function App(): React.JSX.Element {
               </button>
             </div>
           )}
-          {formView ? (
+          {tableView ? (
+            <div className="flex min-h-0 flex-1">
+              <div className="w-[220px] shrink-0 border-r" style={{ borderColor: 'var(--border-subtle)' }}>
+                <Tree />
+              </div>
+              <div className="min-w-0 flex-1">
+                <TableView parentId={tableParent ?? ROOT_ID} />
+              </div>
+            </div>
+          ) : formView ? (
             // The tree stays in a narrow gutter for orientation. A form with no structural context
             // is the thing every "XML made easy" tool ships and every user gets lost in.
             <div className="flex min-h-0 flex-1">

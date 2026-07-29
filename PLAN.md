@@ -12,8 +12,9 @@ paste, schema inference), `packages/validation-protocol` and `packages/xsd-libxm
 authoritative verdict, in a worker) and `packages/schematron` (a direct interpreter over fontoxpath,
 with the live test harness) are in place, with ~550 tests. Every verdict is checked against an
 independent implementation: `libxml2-wasm` for XSD 1.0, `xmlschema` for 1.1, and the ISO Schematron
-reference for Schematron. **Phase 8 — polish — is what remains**, and SPIKE-4 (mixed content) is
-still open. See §10 for the roadmap and the per-phase *done when*.
+reference for Schematron. All five spikes are answered — see [`docs/spikes.md`](docs/spikes.md).
+**Phase 8 is ongoing**; its two risk-carrying items (mixed content, the table view) are done, and
+what remains there is listed honestly in §10. See §10 for the roadmap and the per-phase *done when*.
 
 **Companion documents**
 
@@ -653,8 +654,36 @@ explanation → fix → green ever stops working, CI says so rather than a user.
 Two items from the UX spec are **not** done and are not claimed: first-run coach marks, and expert
 mode's chrome removal. Both are presentation-only and neither changes what the tool can do.
 
-### Phase 8 — Polish (ongoing)
+### Phase 8 — Polish (ongoing) — **the two that carried risk are done**
 Mixed-content editor, XSD diagram, table view for repeated siblings, PWA/offline, i18n.
+
+**Mixed content — SPIKE-4, and §11 risk 3 — is answered, and the spike asked the wrong question.**
+Both of its candidate answers (ProseMirror with a generated schema; a scoped CodeMirror) are
+*editors*, and the unusable part was never the editing — it was the **display**. `<p>See
+<emph>this</emph> for details.</p>` is five unreadable rows before anyone types anything. So a mixed
+element is now **one tree row carrying its flow**, with marked-up runs shown as `⟨…⟩` rather than
+stripped, so it is never a surprise that half a sentence is tagged. The children stay reachable.
+
+Editing is then a much smaller problem, answered with a scoped source snippet: the inner XML in a
+textarea, the schema's permitted inline elements as wrap buttons, and nothing committed until it
+parses — refusing a broken commit matters more here than anywhere else, because the alternative is
+discarding a paragraph someone was midway through typing. ProseMirror was declined deliberately: it
+costs ~150 KB in the entry chunk plus a second document model to keep in step with the CST, which is
+the exact two-representations problem this codebase is arranged around, bought for a minority of
+documents. The seam is `FlowEditor`; `flowSource` and `setFlow` are the whole interface, so a WYSIWYG
+surface can replace it later without anything else moving. What is given up is WYSIWYG, and someone
+editing a 200-paragraph DITA topic all day will want it.
+
+**The table view** turns twelve `<line>` elements with four children each — 60 tree rows — into
+twelve rows and four columns. Reading *down* a column is the question a tree makes hard and a grid
+makes free. It is offered only where a list actually exists, columns accumulate across rows so one
+row missing an optional child does not lose the column for the rest, and a cell whose element is
+absent creates it on first edit rather than being a hole. Nested children never become columns: they
+would produce a grid whose columns mean different things at different depths.
+
+**Not done, and not claimed:** the XSD box diagram (deferred in §7 on the grounds that beginners
+cannot read that notation, and unchanged), PWA/offline, i18n, first-run coach marks, and expert
+mode's chrome removal. None changes what the tool can do.
 
 ---
 
@@ -675,6 +704,11 @@ Mixed-content editor, XSD diagram, table view for repeated siblings, PWA/offline
    XML editor attracts. *Mitigation:* decide in Phase 0, implement in Phase 8. Recommended: an inline
    flow editor (ProseMirror with a schema generated from the content model) for `mixed="true"` elements;
    cheaper fallback is a scoped CodeMirror snippet editor.
+   *Status:* **addressed, and the recommendation was not taken.** The diagnosis was right and the
+   prescription was aimed at the wrong half: five rows is unreadable before any editing happens, so
+   the fix is that a flow is one row. Editing is a scoped source snippet with schema-driven wrap
+   buttons; ProseMirror was declined for the entry-chunk cost and the second document model. See
+   SPIKE-4 in [`docs/spikes.md`](docs/spikes.md).
 4. **Bundle weight.** Two engines plus CodeMirror plus fontoxpath is multiple MB. *Mitigation:*
    rigorous lazy loading per mode, `size-limit` failing the build on regression. A stray top-level
    import pulling a validator into the main chunk is the failure mode.

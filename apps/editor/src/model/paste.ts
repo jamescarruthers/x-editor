@@ -251,7 +251,7 @@ export function applyPaste(
   if (rootId === undefined) return null;
 
   const strip = option.transform === 'strip-namespaces';
-  const commands = rebuild(document, fragment, rootId, option.parent, option.index, strip, true);
+  const commands = rebuildInto(document, fragment, rootId, option.parent, option.index, strip, true);
   if (commands.length === 0) return null;
 
   const name = topLevelNames(fragment)[0];
@@ -265,7 +265,7 @@ export function applyPaste(
  * declared on the pasted element itself. That keeps the paste self-contained: it never rewrites a
  * prefix on an ancestor the user did not touch, and it cannot silently rebind an existing one.
  */
-function rebuild(
+export function rebuildInto(
   document: XmlDocument,
   fragment: XmlDocument,
   sourceId: NodeId,
@@ -304,7 +304,7 @@ function rebuild(
   const commands: Command[] = [command];
   let childIndex = 0;
   for (const childId of fragment.childrenOf(sourceId)) {
-    const sub = rebuild(document, fragment, childId, command.affected, childIndex, strip, false);
+    const sub = rebuildInto(document, fragment, childId, command.affected, childIndex, strip, false);
     if (sub.length > 0) {
       commands.push(...sub);
       childIndex++;

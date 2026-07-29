@@ -11,6 +11,7 @@ import { store, useEditor } from '../state/store.js';
 import { describe, humanise } from '../model/describe.js';
 import { SchematronInspector } from './SchematronSections.js';
 import { XsdInspector } from './XsdSections.js';
+import { FlowEditor } from './FlowEditor.js';
 import { isSchemaDocument } from '../model/componentTree.js';
 import {
   AllowedHere,
@@ -88,6 +89,10 @@ export function Inspector({
       )}
 
       {xsdMode && <XsdInspector />}
+
+      {/* Above the attribute grid: for a paragraph, the flow *is* the content, and having to scroll
+          past six settings to reach it would be the same mistake the tree makes. */}
+      {node.kind === 'element' && <FlowEditor id={id} />}
 
       {/* The schema-driven attributes editor replaces the raw one entirely rather than sitting
           beside it: two attribute lists on one panel is the sort of thing that reads as a bug. */}

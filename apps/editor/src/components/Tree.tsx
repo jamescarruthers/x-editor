@@ -5,6 +5,7 @@ import { store, useEditor } from '../state/store.js';
 import { missingRequiredAttributes, requiredMissing } from '@x-editor/xsd';
 import { buildRows, nodeLabel, textPreview, type Row } from '../model/rows.js';
 import { buildComponentRows } from '../model/componentTree.js';
+import { isFlowElement } from '../model/mixed.js';
 
 const ROW_HEIGHT = 28;
 
@@ -31,7 +32,7 @@ export function Tree(): React.JSX.Element {
     () =>
       store.componentView
         ? buildComponentRows(doc, store.expanded)
-        : buildRows(doc, store.expanded),
+        : buildRows(doc, store.expanded, (id) => isFlowElement(doc, store.schema.model, id)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [doc, store.getSnapshot()],
   );
@@ -302,6 +303,14 @@ function TreeRow({
           {attributes.length > 2 && (
             <span className="shrink-0 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
               +{attributes.length - 2}
+            </span>
+          )}
+
+          {row.flow !== undefined && (
+            // The whole paragraph on one row. Marked-up runs show as ⟨…⟩ rather than being stripped,
+            // so it is never a surprise that half of it is tagged.
+            <span className="truncate" style={{ color: 'var(--text-secondary)' }}>
+              {row.flow}
             </span>
           )}
 
