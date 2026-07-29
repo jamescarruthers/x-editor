@@ -3,6 +3,7 @@ import { store } from '../state/store.js';
 import { EXAMPLES, type Example } from '../examples/index.js';
 import { TOPIC_METADATA_SCHEMA } from '../examples/topic.js';
 import { Wizard } from './Wizard.js';
+import { NEW_XML } from '../state/templates.js';
 
 /**
  * The empty workspace.
@@ -29,13 +30,19 @@ export function StartScreen({
   }
 
   const openExample = (example: Example): void => {
+    // All three files at once. An earlier version attached the schema and loaded the document but
+    // never loaded the rules, so the invoice example — whose whole point is a failing business rule
+    // — opened green and demonstrated nothing.
+    const files = [{ name: example.documentName, source: example.document }];
     if (example.schema !== null && example.schemaName !== null) {
-      const supporting =
-        example.id === 'topic' ? { 'metadata.xsd': TOPIC_METADATA_SCHEMA } : {};
-      store.attachSchema(example.schemaName, example.schema, supporting);
+      files.push({ name: example.schemaName, source: example.schema });
     }
-    store.load(example.document, example.documentName);
-    if (example.rules !== null) store.attachSample(example.document, example.documentName);
+    if (example.rules !== null && example.rulesName !== null) {
+      files.push({ name: example.rulesName, source: example.rules });
+    }
+    if (example.id === 'topic') store.schema.addSupporting('metadata.xsd', TOPIC_METADATA_SCHEMA);
+
+    store.openWorkspace(files, 'xml');
     onDismiss();
   };
 
@@ -73,8 +80,7 @@ export function StartScreen({
             title="Start from scratch"
             body="A blank document, with nothing checking it. You can attach a schema at any point and the guidance appears."
             onClick={() => {
-              store.detachSchema();
-              store.load('<?xml version="1.0" encoding="UTF-8"?>\n<root/>\n', 'untitled.xml');
+              store.openWorkspace([{ name: 'untitled.xml', source: NEW_XML }], 'xml');
               onDismiss();
             }}
           />

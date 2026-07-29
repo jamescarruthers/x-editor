@@ -26,7 +26,7 @@ const DOCUMENT = `<?xml version="1.0" encoding="UTF-8"?>
 `;
 
 function load(source = DOCUMENT): void {
-  store.load(source, 'test.xml');
+  store.openFile('test.xml', source);
   store.attachSchema(EXAMPLE_SCHEMA_NAME, EXAMPLE_SCHEMA);
 }
 
