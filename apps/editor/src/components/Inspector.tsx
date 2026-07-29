@@ -11,6 +11,7 @@ import { store, useEditor } from '../state/store.js';
 import { describe, humanise } from '../model/describe.js';
 import {
   AllowedHere,
+  ProblemsWithThisNode,
   SchemaAttributes,
   SchemaIdentity,
   SchemaValue,
@@ -92,6 +93,10 @@ export function Inspector({
             onCommit={(v) => store.run(setTextValue(doc, id, v))}
           />
         </Section>
+      )}
+
+      {model !== null && context !== null && (
+        <ProblemsWithThisNode context={context} model={model} />
       )}
 
       {model !== null && context !== null ? (

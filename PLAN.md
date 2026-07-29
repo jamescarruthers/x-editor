@@ -4,12 +4,12 @@ A browser-based, tree-node editor for **XML**, **XSD** and **Schematron**, with 
 validation running client-side, designed so that someone who does not already know the schema can
 still produce a valid document.
 
-**Status:** Phases 0–3 implemented. `packages/xml-core` (lossless CST, command log, splice
+**Status:** Phases 0–4 implemented. `packages/xml-core` (lossless CST, command log, splice
 serializer), `packages/xsd` (schema front end, simple- and complex-type compilers, Glushkov
 automaton, query API) and `apps/editor` (four-region shell, virtualized tree, Insert palette,
-schema-driven Inspector) are in place, at ~9,000 lines with 340 tests, and every verdict is checked
-against `libxml2-wasm` in CI. Phase 4 — libxml2 in a worker as the shipped authoritative verdict, the
-`cvc-*` catalogue and quick fixes — is next. See §10 for the roadmap and
+schema-driven Inspector), `packages/validation-protocol` and `packages/xsd-libxml2` (the
+authoritative verdict, in a worker) are in place, with ~400 tests. Every verdict is checked against
+`libxml2-wasm` both in CI and, from Phase 4, live in the editor. **Phase 4b — XSD 1.1 — is next.** See §10 for the roadmap and
 the per-phase *done when*.
 
 **Companion documents**
@@ -99,7 +99,7 @@ Boring, well-supported choices. The novelty budget is spent entirely on the sche
 | Language | TypeScript, `strict` | A discriminated-union CST, a typed worker protocol and a command layer with inverses are exactly where this pays |
 | Framework | React 19 | Chosen for ecosystem depth in the three things we need: virtualized tree, accessible overlays, command palette |
 | Build | Vite | First-class module-worker and WASM handling, which the validators need |
-| Repo | pnpm workspaces | `packages/xml-core`, `packages/xsd`, `packages/schematron`, `packages/validation-protocol`, `apps/editor` |
+| Repo | pnpm workspaces | `packages/xml-core`, `packages/xsd`, `packages/xsd-libxml2`, `packages/validation-protocol`, `packages/schematron`, `apps/editor` |
 | UI kit | shadcn/ui on Radix Primitives + Tailwind v4 | Copy-in source, so a 24px density mode is an edit rather than a fight with a theme API |
 | Tree | `@headless-tree/react` + `@tanstack/react-virtual` | Headless, correct ARIA, DnD/typeahead/search as feature flags; virtualization is mandatory at 50k nodes |
 | Editor widgets | CodeMirror 6 | Source view and the Schematron XPath field. ~10× smaller than Monaco |
@@ -501,11 +501,21 @@ verdict against `libxml2-wasm` and fails the build on a disagreement — it caug
 run (see [`docs/spikes.md`](docs/spikes.md)). What remains is *breadth*: the real corpora named in §9
 (the W3C Schema Test Collection, UBL 2.1, GML 3.2, HL7 CDA, DocBook, SEPA) are not yet vendored.
 
-### Phase 4 — Validation and quick fixes (medium)
+### Phase 4 — Validation and quick fixes (medium) — **done, bar four classes with named reasons**
 libxml2-wasm in a worker, the `lineMap` error→node mapping, the `cvc-*` message catalogue, the
 "Why is this invalid?" explainer, the edit-distance repair algorithm behind quick fixes.
 **Done when:** every one of the 20 error classes in [`docs/schema-engine.md`](docs/schema-engine.md)
 renders in plain English with at least one working one-click fix.
+
+16 of the 20 do, and `packages/xsd/test/taxonomy.test.ts` is the evidence — it asserts, class by
+class, that the message carries no `cvc-` spec-ese, that at least one fix exists, and that the fix
+reads as an instruction. The four outstanding are named rather than quietly omitted: **13 and 14**
+(ID/IDREF and identity constraints) need P8, which this plan defers; **18** (well-formedness) belongs
+to `xml-core` and is reported before this engine runs; **20** (Schematron) is Phase 5.
+
+The repair algorithm is Oflazer error-tolerant alignment, as specified, and a property test checks
+that every alignment it proposes produces a child list the reference matcher accepts — a quick fix
+that leaves the document invalid would be worse than none.
 
 ### Phase 4b — XSD 1.1 (medium)
 `xs:assert` and `xs:alternative` evaluated through fontoxpath (already present), `openContent`,

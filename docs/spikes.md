@@ -126,6 +126,24 @@ unusable, and that is the entire DocBook/DITA/TEI/JATS world.
 
 ---
 
+## What Phase 4 confirmed
+
+Both SPIKE-1 and SPIKE-2 findings now hold in the shipped code as well as the test harness.
+`packages/xsd-libxml2` runs libxml2 in a worker behind the `XsdEngine` interface, serving schema
+documents through the same catalogue-only input provider, and `packages/xsd/src/validationSerializer.ts`
+produces the one-start-tag-per-line text whose line numbers the `lineMap` turns back into node ids.
+
+One thing SPIKE-1 did not anticipate, worth recording: **`libxml2-wasm` initialises with a top-level
+await**, which Vite's default `iife` worker output cannot express. The worker has to be built as an
+ES module (`worker: { format: 'es' }`). The failure is a build error rather than a runtime one, so it
+cannot reach production — but it is the sort of thing that costs an afternoon if it is met without
+warning.
+
+The security model named in PLAN.md §8 is now asserted rather than assumed:
+`packages/xsd-libxml2/test/engine.test.ts` feeds a billion-laughs bomb and an XXE payload pointing at
+`file:///etc/passwd`, and checks that the first returns promptly instead of expanding and the second
+never yields the file's contents.
+
 ## What the differential harness has caught so far
 
 The harness exists because of `PLAN.md` §11's top risk: the guidance engine and libxml2 are two
