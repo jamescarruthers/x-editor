@@ -74,6 +74,8 @@ export interface CompiledFacets {
 }
 
 export interface CompiledSimpleType {
+  /** Discriminates against `CompiledComplexType` wherever a type reference could be either. */
+  readonly form: 'simple';
   readonly name: XsdQName | null;
   readonly variety: Variety;
   /** Null for a union whose members disagree, and for `anySimpleType`. */
@@ -107,6 +109,7 @@ const EMPTY_FACETS: CompiledFacets = {
 const INTERNAL_ORIGIN: Origin = { documentUri: '', node: 0 as never };
 
 export const ANY_SIMPLE_TYPE_DEF: CompiledSimpleType = {
+  form: 'simple',
   name: { namespaceUri: XSD_NS, localName: 'anySimpleType' },
   variety: 'atomic',
   primitive: null,
@@ -207,6 +210,7 @@ export class SimpleTypeCompiler {
               : ANY_SIMPLE_TYPE_DEF;
 
         return {
+          form: 'simple',
           name,
           variety: base.variety,
           primitive: base.primitive,
@@ -228,6 +232,7 @@ export class SimpleTypeCompiler {
               : ANY_SIMPLE_TYPE_DEF;
 
         return {
+          form: 'simple',
           name,
           variety: 'list',
           primitive: null,
@@ -251,6 +256,7 @@ export class SimpleTypeCompiler {
         ];
         const primitives = new Set(members.map((member) => member.primitive));
         return {
+          form: 'simple',
           name,
           variety: 'union',
           primitive: primitives.size === 1 ? (members[0]?.primitive ?? null) : null,
@@ -273,6 +279,7 @@ export class SimpleTypeCompiler {
     if (builtIn.variety === 'list') {
       const itemType = this.compileByName(builtInName(builtIn.itemType!), INTERNAL_ORIGIN);
       return {
+        form: 'simple',
         name: builtInName(builtIn.localName),
         variety: 'list',
         primitive: null,
@@ -310,6 +317,7 @@ export class SimpleTypeCompiler {
     facets = { ...facets, whiteSpace: builtIn.whiteSpace };
 
     return {
+      form: 'simple',
       name: builtInName(builtIn.localName),
       variety: 'atomic',
       primitive: builtIn.primitive,

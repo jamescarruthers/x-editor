@@ -122,3 +122,24 @@ export type {
   PatternGroup,
   ValueProblem,
 } from './simpleTypes.js';
+
+export {
+  compileAll,
+  isAllParticle,
+  allIsValid,
+  allWhatCanGoHere,
+  allRequiredMissing,
+  allFirstInvalidIndex,
+} from './allModel.js';
+export type { AllContentModel, AllMember } from './allModel.js';
+
+export { SchemaModel, ANY_TYPE_DEF } from './model.js';
+export type {
+  AttributeUse,
+  CompiledComplexType,
+  CompiledElement,
+  CompiledType,
+  ContentKind,
+  ContentModel,
+  Wildcard,
+} from './model.js';
