@@ -3,15 +3,17 @@ import { insertElement, removeNode, ROOT_ID } from '@x-editor/xml-core';
 import { store, useEditor } from './state/store.js';
 import { Tree } from './components/Tree.js';
 import { Inspector } from './components/Inspector.js';
-import { HistoryPanel, ProblemsPanel, SourcePanel } from './components/Panels.js';
+import { ExplainPanel, HistoryPanel, ProblemsPanel, SourcePanel } from './components/Panels.js';
 import { InsertPaletteHost } from './components/InsertPalette.js';
 import { declaredSchemaLocation } from './state/schema.js';
 import { documentProblems } from './model/problems.js';
 import { isSchemaDocument } from './model/componentTree.js';
 import { EXAMPLE_SCHEMA, EXAMPLE_SCHEMA_NAME } from './examples/purchaseOrder.js';
 import { StartScreen } from './components/StartScreen.js';
+import { FormView } from './components/FormView.js';
+import { PasteSheetHost } from './components/PasteSheet.js';
 
-type RightTab = 'source' | 'history';
+type RightTab = 'source' | 'history' | 'explain';
 
 export function App(): React.JSX.Element {
   useEditor();
@@ -22,6 +24,7 @@ export function App(): React.JSX.Element {
   // Shown once, dismissed for the session. Gated in memory rather than in storage: a first-run
   // screen that will not stay dismissed is worse than one that never appears.
   const [startOpen, setStartOpen] = useState(true);
+  const [formView, setFormView] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const schemaInput = useRef<HTMLInputElement>(null);
   const sampleInput = useRef<HTMLInputElement>(null);
@@ -69,9 +72,12 @@ export function App(): React.JSX.Element {
         event.preventDefault();
         store.redo();
         announce('Redo.');
-      } else if (event.key === 'e') {
+      } else if (event.key === 'e' && !event.shiftKey) {
         event.preventDefault();
         setRightTab((t) => (t === 'source' ? 'history' : 'source'));
+      } else if ((event.key === 'e' || event.key === 'E') && event.shiftKey) {
+        event.preventDefault();
+        setFormView((value) => !value);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -229,6 +235,17 @@ export function App(): React.JSX.Element {
           </ToolbarButton>
         )}
 
+        {model !== null && !isSchemaDocument(doc) && (
+          // Available only with a schema, because a form is built from one. Offering the toggle
+          // without would be a button that explains why it does nothing.
+          <ToolbarButton
+            onClick={() => setFormView((value) => !value)}
+            title="Fill this document in as a labelled form (Ctrl+Shift+E)"
+          >
+            {formView ? 'Tree' : 'Form'}
+          </ToolbarButton>
+        )}
+
         {isSchemaDocument(doc) && (
           // Both views address the same nodes, so this is a lens rather than a mode: selection,
           // undo and the Inspector all survive the toggle with nothing to synchronise.
@@ -339,9 +356,18 @@ export function App(): React.JSX.Element {
             <Tab active={rightTab === 'history'} onClick={() => setRightTab('history')}>
               History
             </Tab>
+            <Tab active={rightTab === 'explain'} onClick={() => setRightTab('explain')}>
+              Explain
+            </Tab>
           </div>
           <div className="min-h-0 flex-1">
-            {rightTab === 'source' ? <SourcePanel /> : <HistoryPanel />}
+            {rightTab === 'source' ? (
+              <SourcePanel />
+            ) : rightTab === 'history' ? (
+              <HistoryPanel />
+            ) : (
+              <ExplainPanel />
+            )}
           </div>
         </aside>
 
@@ -430,9 +456,22 @@ export function App(): React.JSX.Element {
               </button>
             </div>
           )}
-          <div className="min-h-0 flex-1">
-            <Tree />
-          </div>
+          {formView ? (
+            // The tree stays in a narrow gutter for orientation. A form with no structural context
+            // is the thing every "XML made easy" tool ships and every user gets lost in.
+            <div className="flex min-h-0 flex-1">
+              <div className="w-[220px] shrink-0 border-r" style={{ borderColor: 'var(--border-subtle)' }}>
+                <Tree />
+              </div>
+              <div className="min-w-0 flex-1">
+                <FormView rootId={doc.documentElement() ?? ROOT_ID} />
+              </div>
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1">
+              <Tree />
+            </div>
+          )}
           <Breadcrumb />
         </main>
 
@@ -491,6 +530,8 @@ export function App(): React.JSX.Element {
         onClose={() => setPaletteOpen(false)}
         onAnnounce={announce}
       />
+
+      <PasteSheetHost />
 
       {/*
         One polite live region, written through one place, so ordering and debouncing stay in one

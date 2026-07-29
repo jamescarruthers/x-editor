@@ -3,6 +3,8 @@ import { store, useEditor } from '../state/store.js';
 import { documentProblems } from '../model/problems.js';
 import { applyFix } from '../model/fixes.js';
 import type { Diagnostic } from '@x-editor/xsd';
+import { explainDocument } from '../model/explain.js';
+import { inferSchema, type InferenceResult } from '../model/infer.js';
 
 /** The serialized document, live. Proof the splice serializer is preserving what it should. */
 export function SourcePanel(): React.JSX.Element {
@@ -16,6 +18,122 @@ export function SourcePanel(): React.JSX.Element {
     >
       {text}
     </pre>
+  );
+}
+
+/**
+ * "Explain my document", and the offer to infer a schema when there is none.
+ *
+ * These sit together because they answer the same situation from two directions: a file has arrived
+ * and the person holding it does not know what it is. The explanation tells them; the inference
+ * gives them something the rest of the tool can work from.
+ */
+export function ExplainPanel(): React.JSX.Element {
+  useEditor();
+  const document = store.document;
+  const model = store.schema.model;
+
+  const explanation = useMemo(
+    () => explainDocument(document, model),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.getSnapshot(), model],
+  );
+  const [inferred, setInferred] = useState<InferenceResult | null>(null);
+
+  return (
+    <div className="scroll-thin h-full overflow-y-auto px-3 py-2.5">
+      <p className="mb-3 text-[13px]" style={{ color: 'var(--text-primary)' }}>
+        {explanation.summary}
+      </p>
+
+      {model === null && (
+        <div
+          className="mb-3 rounded border px-2 py-2"
+          style={{ borderColor: 'var(--border-default)', background: 'var(--surface-2)' }}
+        >
+          {inferred === null ? (
+            <>
+              <div className="mb-1 text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                No schema attached. One can be worked out from this document — a starting point
+                rather than an answer, but enough for the palette and the form view to work.
+              </div>
+              <button
+                type="button"
+                onClick={() => setInferred(inferSchema(document))}
+                className="rounded border px-2 py-1 text-[12px]"
+                style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
+              >
+                Work out a schema from this document
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="mb-1 text-[12px] font-medium">
+                A schema that fits this document
+              </div>
+              <ul className="mb-2 flex flex-col gap-1">
+                {inferred.caveats.map((caveat) => (
+                  <li key={caveat} className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                    {caveat}
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => store.attachSchema('inferred.xsd', inferred.source)}
+                  className="rounded border px-2 py-1 text-[12px]"
+                  style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
+                >
+                  Attach it
+                </button>
+                <button
+                  type="button"
+                  onClick={() => store.load(inferred.source, 'inferred.xsd')}
+                  className="rounded border px-2 py-1 text-[12px]"
+                  style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
+                >
+                  Open it to edit
+                </button>
+              </div>
+              <pre
+                className="scroll-thin mt-2 max-h-64 overflow-auto font-mono text-[11px] whitespace-pre"
+                style={{ color: 'var(--text-tertiary)' }}
+              >
+                {inferred.source}
+              </pre>
+            </>
+          )}
+        </div>
+      )}
+
+      <ul className="flex flex-col gap-2">
+        {explanation.steps.map((step, index) => (
+          <li key={index}>
+            <button
+              type="button"
+              onClick={() => store.select(step.node)}
+              className="text-left"
+            >
+              <span className="text-[12px] font-medium">{step.title}</span>
+              {!step.fromSchema && (
+                // Users must always be able to tell a rule from a guess.
+                <span
+                  className="ml-1.5 rounded px-1 text-[10px]"
+                  style={{ background: 'var(--surface-2)', color: 'var(--text-tertiary)' }}
+                  title="Read from your document, not from a schema"
+                >
+                  auto
+                </span>
+              )}
+              <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                {step.text}
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

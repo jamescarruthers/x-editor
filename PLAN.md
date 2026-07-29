@@ -4,15 +4,16 @@ A browser-based, tree-node editor for **XML**, **XSD** and **Schematron**, with 
 validation running client-side, designed so that someone who does not already know the schema can
 still produce a valid document.
 
-**Status:** Phases 0–6 implemented. `packages/xml-core` (lossless CST, command log, splice
+**Status:** Phases 0–7 implemented. `packages/xml-core` (lossless CST, command log, splice
 serializer), `packages/xsd` (schema front end, simple- and complex-type compilers, Glushkov
 automaton, query API) and `apps/editor` (four-region shell, virtualized tree, Insert palette,
-schema-driven Inspector, XSD component view and refactorings), `packages/validation-protocol` and
-`packages/xsd-libxml2` (the authoritative verdict, in a worker) and `packages/schematron` (a direct
-interpreter over fontoxpath, with the live test harness) are in place, with ~530 tests. Every verdict
-is checked against an independent implementation: `libxml2-wasm` for XSD 1.0, `xmlschema` for 1.1,
-and the ISO Schematron reference for Schematron. **Phase 7 — beginner scaffolding — is next.** See
-§10 for the roadmap and the per-phase *done when*.
+schema-driven Inspector, XSD component view and refactorings, form view, new-document wizard, smart
+paste, schema inference), `packages/validation-protocol` and `packages/xsd-libxml2` (the
+authoritative verdict, in a worker) and `packages/schematron` (a direct interpreter over fontoxpath,
+with the live test harness) are in place, with ~550 tests. Every verdict is checked against an
+independent implementation: `libxml2-wasm` for XSD 1.0, `xmlschema` for 1.1, and the ISO Schematron
+reference for Schematron. **Phase 8 — polish — is what remains**, and SPIKE-4 (mixed content) is
+still open. See §10 for the roadmap and the per-phase *done when*.
 
 **Companion documents**
 
@@ -608,9 +609,49 @@ what they wrote; typing a value that ought to be legal and watching it fail tell
 pattern that could not be read, and one checked loosely because it uses a Unicode property inside a
 subtraction.
 
-### Phase 7 — Beginner scaffolding (medium)
+### Phase 7 — Beginner scaffolding (medium) — **done, bar coach marks and expert mode**
 Form view, the new-document wizard, onboarding empty states and the three bundled examples, smart
 paste, "explain my document", schema inference.
+**Done when:** someone who has never seen the schema can go from an `.xsd` to a valid document, and
+someone who has never seen the document can find out what it is.
+
+Both hold. The wizard's three questions — which schema, which root, how much — produce a document
+already shaped like the answer, and the "how much" step measures both options by generating them
+rather than describing them: *142 elements, 9 values to review* beats "this may be large".
+
+The single decision the phase turns on is that **a generated document is valid and meaningless**.
+That is the failure mode of every document generator and it is invisible without help: the badge
+reads green while every date says `2026-01-01`. So the scaffolder marks every value it had to invent,
+the app bar counts them, `F7` steps through them and the tree dots them where they sit. Values from
+`fixed` and `default` are not marked — the schema author already decided those, and listing them
+would pad the to-do list with items nobody can act on.
+
+Whether a generated value has been reviewed is derived by comparing it against the document rather
+than tracked through the edit that changed it. That is exact, costs one pass over the placeholder
+list, and gets undo right for free; an intercept-the-edit scheme silently loses entries, and there is
+a test pinning that case specifically.
+
+**Smart paste** asks before the edit instead of reporting errors after it, with each option's cost
+measured — *paste inside: adds 2 errors* — and ranked by consequence first, proximity second. A plain
+`Ctrl+V` still goes straight through when exactly one option is valid, because turning an expert's
+paste into a dialogue is its own kind of failure. The fragment is reconstructed node by node rather
+than regenerated from the schema: an earlier version built a skeleton per pasted name and produced
+structurally correct elements containing none of what was on the clipboard, which a test now forbids.
+
+**Schema inference** is permissive where the evidence is thin and exact where it is not. Anything
+seen twice is written `unbounded` — permitting one more than the file showed is a smaller mistake
+than rejecting the next file — while every value stays `xs:string`, because guessing `xs:date` from
+one date-shaped string rejects documents the author would have accepted. The caveats are part of the
+output, not a disclaimer around it.
+
+The three bundled examples are chosen for one lesson each: the purchase order teaches the core loop,
+the topic teaches prefixes and mixed content across two namespaces and an import, and the invoice is
+structurally perfect and wrong — its total is 120.00 against lines summing to 140.00. A test asserts
+it fails exactly one rule and goes green when corrected, so if the first-minute demo of error →
+explanation → fix → green ever stops working, CI says so rather than a user.
+
+Two items from the UX spec are **not** done and are not claimed: first-run coach marks, and expert
+mode's chrome removal. Both are presentation-only and neither changes what the tool can do.
 
 ### Phase 8 — Polish (ongoing)
 Mixed-content editor, XSD diagram, table view for repeated siblings, PWA/offline, i18n.

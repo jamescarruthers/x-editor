@@ -154,7 +154,7 @@ function AttributeRow({
  * A closed enumeration renders as radios or a select rather than a text box the user can get wrong,
  * which is the single highest-value thing the schema can do for someone typing a value.
  */
-function WidgetInput({
+export function WidgetInput({
   widget,
   value,
   onCommit,
@@ -504,7 +504,7 @@ function rich(text: string): React.ReactNode {
   );
 }
 
-function CommitInput({
+export function CommitInput({
   value,
   onCommit,
   placeholder,
