@@ -11,9 +11,6 @@ importers:
       fast-check:
         specifier: ^3.23.0
         version: 3.23.2
-      libxml2-wasm:
-        specifier: ^0.7.1
-        version: 0.7.1
       playwright:
         specifier: ^1.62.0
         version: 1.62.0
@@ -75,6 +72,10 @@ importers:
       '@x-editor/xml-core':
         specifier: workspace:*
         version: link:../xml-core
+    devDependencies:
+      libxml2-wasm:
+        specifier: 0.7.1
+        version: 0.7.1
 
 packages:
 
