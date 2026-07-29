@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react';
-import { ROOT_ID, isElement, type NodeId } from '@x-editor/xml-core';
+import {
+  ROOT_ID,
+  isElement,
+  removeAttribute,
+  setAttribute,
+  type NodeId,
+  type XmlDocument,
+} from '@x-editor/xml-core';
 import {
   SchemaModel,
   XSD_NS,
@@ -16,9 +23,11 @@ import {
   attributeValue,
   documentationOf,
   extractType,
+  globalDeclarations,
   inlineType,
   isGlobalDeclaration,
   isInlineType,
+  referenceTextFor,
   referencesTo,
   renameComponent,
   resolveReference,
@@ -75,6 +84,7 @@ export function XsdInspector(): React.JSX.Element {
   return (
     <>
       {named && <IdentitySection id={id} />}
+      {(kind === 'element' || kind === 'attribute') && <TypeSection id={id} />}
       {here.length > 0 && <ProblemsSection problems={here} />}
       <RefactorSection id={id} />
       {simple !== null && <FacetsSection type={simple} />}
@@ -293,6 +303,91 @@ function referenceLabel(id: NodeId): string {
 }
 
 /**
+ * The declaration's type, where an author looks for it.
+ *
+ * `type=` is an ordinary attribute and was editable all along in the attributes grid at the bottom
+ * of the Inspector — but the section named "Type" sat above it and was read-only, describing what
+ * the type permits. So the one control called Type was the one that could not change it, which is a
+ * worse arrangement than having no section at all.
+ *
+ * The list offers the schema's own named types, written the way *this* element can refer to them:
+ * `referenceTextFor` works out the prefix from the bindings in scope, and returns null where no
+ * correct form exists rather than writing a bare name that would silently point elsewhere. It is a
+ * datalist rather than a select because `type=` may legitimately name something this schema cannot
+ * see — a type from an `import` whose file is not loaded — and a closed list would make that
+ * untypeable.
+ */
+function TypeSection({ id }: { id: NodeId }): React.JSX.Element {
+  const document = store.document;
+  const value = attributeValue(document, id, 'type') ?? '';
+  const inline = isInlineType(document, id) || hasInlineType(document, id);
+
+  const options = useMemo(() => {
+    const named = globalDeclarations(document)
+      .filter((declaration) => declaration.space === 'type')
+      .map((declaration) => referenceTextFor(document, id, declaration.name.localName))
+      .filter((text): text is string => text !== null);
+    // The built-ins an author reaches for most, prefixed the way this schema binds the XSD
+    // namespace — a schema that binds it as `xsd:` should not be offered `xs:string`.
+    const xsd = [...document.inScopeNamespaces(id)].find(([, uri]) => uri === XSD_NS)?.[0];
+    const builtIns =
+      xsd === undefined
+        ? []
+        : ['string', 'boolean', 'integer', 'decimal', 'date', 'dateTime', 'anyURI'].map(
+            (name) => (xsd === '' ? name : `${xsd}:${name}`),
+          );
+    return [...new Set([...named, ...builtIns])];
+  }, [document, id, store.getSnapshot()]);
+
+  if (inline) {
+    return (
+      <Section title="Type">
+        <p className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+          This declaration defines its type inline, so it has no <code>type</code> attribute. Use
+          Extract above to give it a name other declarations can point at.
+        </p>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="Type">
+      <input
+        list={`types-${id}`}
+        value={value}
+        onChange={(event) => {
+          const next = event.target.value;
+          const name = { prefix: '', localName: 'type', namespaceUri: null };
+          store.run(
+            next.trim() === ''
+              ? removeAttribute(document, id, name)
+              : setAttribute(document, id, name, next),
+          );
+        }}
+        placeholder="no type — anything is allowed"
+        spellCheck={false}
+        className="w-full rounded border px-1.5 py-1 font-mono text-[12px]"
+        style={{
+          borderColor: 'var(--border-default)',
+          background: 'var(--surface-0)',
+          color: 'var(--text-primary)',
+        }}
+      />
+      <datalist id={`types-${id}`}>
+        {options.map((option) => (
+          <option key={option} value={option} />
+        ))}
+      </datalist>
+    </Section>
+  );
+}
+
+/** True when a declaration holds an anonymous `xs:simpleType` or `xs:complexType` child. */
+function hasInlineType(document: XmlDocument, id: NodeId): boolean {
+  return document.childrenOf(id).some((child) => isInlineType(document, child));
+}
+
+/**
  * Facets, and a box to try a value against them.
  *
  * The test box is the feature. A list of facets tells an author what they wrote; typing a value that
@@ -309,7 +404,7 @@ function FacetsSection({ type }: { type: CompiledSimpleType }): React.JSX.Elemen
   const sample = pattern === undefined ? null : sampleFor(pattern.source);
 
   return (
-    <Section title="Type">
+    <Section title="What this type allows">
       <p style={{ color: 'var(--text-secondary)' }}>
         {type.documentation !== '' && `${type.documentation} `}
         {description}
