@@ -62,6 +62,18 @@ export class ValidationClient {
   private inFlight = 0;
 
   /**
+   * True once this worker has said `ready`, which is when it can be posted to at all.
+   *
+   * The worker module top-level-awaits its WASM instantiation (`libxml2-wasm` does this on
+   * import), and a module worker's message port is enabled at that first await — before the
+   * worker's own `message` listener exists. A message posted in that window is not queued; it is
+   * dispatched to nobody and silently lost. That is exactly where a `compileSchema` posted right
+   * after `new Worker(...)` lands on a slow start, after which every validation answers with the
+   * engine's "No schema has been compiled." So nothing is posted until the handshake completes.
+   */
+  private ready = false;
+
+  /**
    * Everything queued behind the document currently in flight, foreground first.
    *
    * A corpus turns one schema edit into N verdicts, and libxml2 runs one document in one worker.
@@ -155,8 +167,9 @@ export class ValidationClient {
     }, DEBOUNCE_MS);
   }
 
-  /** Sends the next queued document, if the worker is free. */
+  /** Sends the next queued document, if the worker is free and has finished starting. */
   private pump(): void {
+    if (!this.ready) return;
     if (this.inFlight !== 0) return;
     // The debounce timer can fire after a compile failure and refill the queue, so the "no verdict
     // against a schema that did not compile" decision is enforced here, where sending happens,
@@ -203,6 +216,7 @@ export class ValidationClient {
     this.timer = null;
     this.worker?.terminate();
     this.worker = null;
+    this.ready = false;
     this.inFlight = 0;
     // A respawned worker shares no revisions with the old one, so every pending mapping is void.
     this.queue = [];
@@ -254,13 +268,8 @@ export class ValidationClient {
       this.onChange();
     });
     this.worker = worker;
-
-    this.post(worker, {
-      type: 'compileSchema',
-      revision: this.revision,
-      sources: this.sources,
-      rootUri: this.rootUri,
-    });
+    // The schema is posted from the `ready` handshake, not here: until the worker says so, its
+    // message listener may not exist yet and anything posted vanishes.
   }
 
   private post(worker: Worker, request: WorkerRequest): void {
@@ -269,8 +278,20 @@ export class ValidationClient {
 
   private receive(response: WorkerResponse): void {
     switch (response.type) {
-      case 'ready':
+      case 'ready': {
+        const worker = this.worker;
+        if (worker === null) return;
+        this.ready = true;
+        this.post(worker, {
+          type: 'compileSchema',
+          revision: this.revision,
+          sources: this.sources,
+          rootUri: this.rootUri,
+        });
+        // Anything requested while the worker was starting has been waiting in the queue.
+        this.pump();
         return;
+      }
 
       case 'schemaCompiled':
         this.state = response.ok

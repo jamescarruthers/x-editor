@@ -205,8 +205,8 @@
     "semantic_hash": "adae10dedbc67de6712def5dde0e1009"
   },
   "apps/editor/src/state/validation.ts": {
-    "mtime": 1785532413.7110543,
-    "ast_hash": "35a260ad64a9b65fb6247b23b117fbd6",
+    "mtime": 1785533652.936817,
+    "ast_hash": "9f37b48f7a0ef23beebc57a198e18c6f",
     "semantic_hash": ""
   },
   "apps/editor/src/worker/validation.worker.ts": {
@@ -705,8 +705,8 @@
     "semantic_hash": ""
   },
   "apps/editor/test/validationQueue.test.ts": {
-    "mtime": 1785532444.2110536,
-    "ast_hash": "67070e029f70ff17907116084be33289",
+    "mtime": 1785533679.5928164,
+    "ast_hash": "8e56c3fe93b24aabcd88c502e6a18893",
     "semantic_hash": ""
   },
   "apps/editor/test/examples.test.ts": {
