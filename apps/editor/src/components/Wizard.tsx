@@ -10,7 +10,6 @@ import {
 import { store } from '../state/store.js';
 import { scaffoldDocument } from '../model/scaffold.js';
 import { EXAMPLES } from '../examples/index.js';
-import { TOPIC_METADATA_SCHEMA } from '../examples/topic.js';
 
 /**
  * The new-document wizard.
@@ -107,8 +106,9 @@ export function Wizard({
                   key={example.id}
                   type="button"
                   onClick={() => {
-                    const supporting =
-                      example.id === 'topic' ? { 'metadata.xsd': TOPIC_METADATA_SCHEMA } : {};
+                    const supporting = Object.fromEntries(
+                      example.supporting.map((file) => [file.name, file.source]),
+                    );
                     chooseSchema(compile(example.schemaName!, example.schema!, supporting));
                   }}
                   className="rounded border px-2.5 py-2 text-left"

@@ -170,3 +170,57 @@ describe('validating a corpus through one worker', () => {
     expect(client.stateFor(7)).toBeNull();
   });
 });
+
+describe('a schema that does not compile', () => {
+  const failCompile = (): FakeWorker => {
+    client.setSchema([{ uri: 'bad.xsd', text: '<xs:schema/>' }] as never, 'bad.xsd');
+    const worker = FakeWorker.live.at(-1)!;
+    worker.reply({
+      type: 'schemaCompiled',
+      ok: false,
+      errors: [{ message: "The QName value 'meta:audience' does not resolve.", line: 19, col: 0 }],
+    });
+    return worker;
+  };
+
+  it('stops the queue: no verdict is asked for against it', () => {
+    const worker = failCompile();
+    client.requestAll([
+      { id: 1, doc: doc('<a/>') },
+      { id: 2, doc: doc('<b/>') },
+    ]);
+    vi.advanceTimersByTime(200);
+
+    // Each validate would come back as the engine's generic "No schema has been compiled." — a
+    // wasted round-trip and a worse message than the compile error already on screen.
+    expect(worker.validations).toHaveLength(0);
+    expect(client.state.status).toBe('failed');
+    expect(client.state.message).toContain('does not resolve');
+  });
+
+  it('keeps the compile error when a verdict was already in flight', () => {
+    // The failure can arrive after a validate is already in the worker's mailbox. The verdict it
+    // produces — the generic message — must not replace the compile error, and must not become a
+    // per-file finding.
+    client.requestAll([{ id: 1, doc: doc('<a/>') }]);
+    vi.advanceTimersByTime(200);
+    const worker = FakeWorker.live.at(-1)!;
+    const inFlight = worker.validations[0]!;
+
+    worker.reply({
+      type: 'schemaCompiled',
+      ok: false,
+      errors: [{ message: 'the informative compile error', line: 1, col: 0 }],
+    });
+    worker.reply({
+      type: 'validated',
+      revision: inFlight.revision,
+      valid: false,
+      errors: [{ message: 'No schema has been compiled.', line: 0, col: 0 }],
+    });
+
+    expect(client.state.status).toBe('failed');
+    expect(client.state.message).toBe('the informative compile error');
+    expect(client.stateFor(1)).toBeNull();
+  });
+});

@@ -158,6 +158,13 @@ export class ValidationClient {
   /** Sends the next queued document, if the worker is free. */
   private pump(): void {
     if (this.inFlight !== 0) return;
+    // The debounce timer can fire after a compile failure and refill the queue, so the "no verdict
+    // against a schema that did not compile" decision is enforced here, where sending happens,
+    // rather than only where the failure arrives. The next successful compile resets the status.
+    if (this.state.status === 'failed') {
+      this.queue = [];
+      return;
+    }
     const next = this.queue.shift();
     if (next === undefined) return;
     this.send(next.doc, next.id);
@@ -275,6 +282,10 @@ export class ValidationClient {
               stale: false,
               message: response.errors[0]?.message ?? 'The schema could not be compiled.',
             };
+        // No verdict is possible against a schema that did not compile: each queued document would
+        // come back as the engine's generic "No schema has been compiled.", which is both a wasted
+        // round-trip and a worse message than the compile error already on screen.
+        if (!response.ok) this.queue = [];
         this.onChange();
         return;
 
@@ -293,6 +304,14 @@ export class ValidationClient {
         );
         const stale = superseded;
         if (this.inFlight === response.revision) this.inFlight = 0;
+
+        // A validate can already be in the worker's mailbox when its schema fails to compile, and
+        // the answer it produces is the engine's "No schema has been compiled." — which must not
+        // replace the compile error, on the header or on the file. Old findings stay, dimmed.
+        if (this.state.status === 'failed') {
+          this.pump();
+          return;
+        }
 
         const verdict: VerdictState = {
           status: 'ready',
