@@ -82,7 +82,6 @@ export function workspaceProblems(): WorkspaceProblem[] {
   // The instance half, per document. This is the corpus: one schema and one rule set, checked
   // against every instance that is open, so a known-good and a known-bad file both react to the
   // same edit. `documentProblems` is in-process and memoised, so N documents is N cheap queries.
-  const verdict = store.verdict.state;
   for (const xmlFile of store.filesOfKind('xml')) {
     if (store.schema.model !== null) {
       for (const diagnostic of documentProblems(store.schema.model, xmlFile.doc)) {
@@ -97,11 +96,11 @@ export function workspaceProblems(): WorkspaceProblem[] {
       }
     }
 
-    // libxml2 still holds one verdict for one document — the queue is the next step. Attributing it
-    // to the wrong file would be worse than withholding it, so it is only shown for the document it
-    // actually ran against.
-    if (!verdict.stale && store.verdict.documentId === xmlFile.id) {
-      for (const finding of verdict.findings) {
+    // libxml2's verdict for this document specifically. One worker validates the corpus in turn, so
+    // a file that has not come round yet simply has no second opinion rather than borrowing one.
+    const engineVerdict = store.verdict.stateFor(xmlFile.id);
+    if (engineVerdict !== null && !engineVerdict.stale) {
+      for (const finding of engineVerdict.findings) {
         out.push({
           fileId: xmlFile.id,
           file: 'xml',

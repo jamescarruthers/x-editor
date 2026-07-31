@@ -60,8 +60,26 @@ export class ValidationClient {
   private worker: Worker | null = null;
   private revision = 0;
   private inFlight = 0;
+
+  /**
+   * Everything queued behind the document currently in flight, foreground first.
+   *
+   * A corpus turns one schema edit into N verdicts, and libxml2 runs one document in one worker.
+   * The queue is what keeps that from becoming N worker round-trips fired at once: documents are
+   * validated one at a time against the schema *already compiled* into the running worker, so a
+   * schema change costs one recompile plus N validations rather than N recompiles.
+   */
+  private queue: { id: number; doc: XmlDocument }[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private payload: ValidationPayload | null = null;
+  /**
+   * The serialized copy per in-flight revision, not one global.
+   *
+   * `nodeForLine` maps libxml2's line numbers back through the exact text that produced them. With
+   * several documents in flight a single payload would map one document's error onto another
+   * document's nodes — silently, and to a plausible-looking node.
+   */
+  private payloads = new Map<number, ValidationPayload>();
+  private revisionFile = new Map<number, number>();
   private sources: readonly SchemaSource[] = [];
   private rootUri = '';
 
@@ -76,6 +94,15 @@ export class ValidationClient {
    */
   documentId: number | null = null;
 
+  /**
+   * The verdict per document, which is what the file counts read.
+   *
+   * `state` remains the single most-recent verdict plus the worker's own status — compiling,
+   * failed, unavailable — because those are properties of the schema and the worker rather than of
+   * any one document, and the header shows them once.
+   */
+  readonly states = new Map<number, VerdictState>();
+
   constructor(private readonly onChange: () => void) {}
 
   /** Point the worker at a schema. Compiling is what makes the first validation fast. */
@@ -85,6 +112,7 @@ export class ValidationClient {
 
     if (sources.length === 0) {
       this.stop();
+      this.states.clear();
       this.state = IDLE;
       this.onChange();
       return;
@@ -95,34 +123,60 @@ export class ValidationClient {
 
   /** Ask for a verdict on the current document, debounced. */
   request(document: XmlDocument, documentId: number | null = null): void {
-    if (this.sources.length === 0 || this.worker === null) return;
-    this.documentId = documentId;
+    this.requestAll([{ id: documentId ?? 0, doc: document }]);
+  }
 
-    // Existing findings become stale the instant the document changes, so the UI can dim them
-    // rather than continue asserting something about a document that no longer exists.
+  /**
+   * Ask for a verdict on every open instance document, debounced.
+   *
+   * Caller order is honoured and matters: the document being looked at goes first, because a verdict
+   * someone is waiting for should not queue behind nine they are not.
+   */
+  requestAll(documents: readonly { id: number; doc: XmlDocument }[]): void {
+    if (this.sources.length === 0 || this.worker === null) return;
+
+    // Existing findings become stale the instant any document changes, so the UI can dim them rather
+    // than continue asserting something about a document that no longer exists.
+    for (const [id, state] of this.states) {
+      if (state.findings.length > 0 || state.valid !== null) {
+        this.states.set(id, { ...state, stale: true });
+      }
+    }
     if (this.state.findings.length > 0 || this.state.valid !== null) {
       this.state = { ...this.state, stale: true };
-      this.onChange();
     }
+    this.onChange();
 
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
-      this.send(document);
+      this.queue = [...documents];
+      this.pump();
     }, DEBOUNCE_MS);
   }
 
-  private send(document: XmlDocument): void {
+  /** Sends the next queued document, if the worker is free. */
+  private pump(): void {
+    if (this.inFlight !== 0) return;
+    const next = this.queue.shift();
+    if (next === undefined) return;
+    this.send(next.doc, next.id);
+  }
+
+  private send(document: XmlDocument, documentId: number): void {
     const worker = this.worker;
     if (worker === null) return;
 
-    this.payload = serializeForValidation(document);
+    const payload = serializeForValidation(document);
     this.revision++;
+    this.payloads.set(this.revision, payload);
+    this.revisionFile.set(this.revision, documentId);
+    this.documentId = documentId;
     this.inFlight = this.revision;
     this.state = { ...this.state, status: 'validating' };
     this.onChange();
 
-    this.post(worker, { type: 'validate', revision: this.revision, text: this.payload.text });
+    this.post(worker, { type: 'validate', revision: this.revision, text: payload.text });
   }
 
   /**
@@ -143,6 +197,15 @@ export class ValidationClient {
     this.worker?.terminate();
     this.worker = null;
     this.inFlight = 0;
+    // A respawned worker shares no revisions with the old one, so every pending mapping is void.
+    this.queue = [];
+    this.payloads.clear();
+    this.revisionFile.clear();
+  }
+
+  /** The verdict for one document, or null when it has not been checked against this schema. */
+  stateFor(id: number): VerdictState | null {
+    return this.states.get(id) ?? null;
   }
 
   private restart(): void {
@@ -218,11 +281,20 @@ export class ValidationClient {
       case 'validated': {
         // A result for a revision the user has already edited past is not wrong, only late; it is
         // shown dimmed until the current one arrives.
-        const stale = response.revision !== this.revision;
-        if (!stale) this.inFlight = 0;
+        // Stale only against its own document: with a corpus in flight, revision N+1 belonging to
+        // another file does not make this file's verdict late.
+        const fileId = this.revisionFile.get(response.revision) ?? null;
+        const payload = this.payloads.get(response.revision) ?? null;
+        this.payloads.delete(response.revision);
+        this.revisionFile.delete(response.revision);
 
-        const payload = this.payload;
-        this.state = {
+        const superseded = [...this.revisionFile.entries()].some(
+          ([revision, id]) => id === fileId && revision > response.revision,
+        );
+        const stale = superseded;
+        if (this.inFlight === response.revision) this.inFlight = 0;
+
+        const verdict: VerdictState = {
           status: 'ready',
           valid: response.valid,
           stale,
@@ -235,7 +307,14 @@ export class ValidationClient {
             line: error.line,
           })),
         };
+
+        if (fileId !== null) this.states.set(fileId, verdict);
+        this.state = verdict;
+        this.documentId = fileId;
         this.onChange();
+
+        // Straight on to the next document, against the schema already compiled into this worker.
+        this.pump();
         return;
       }
 

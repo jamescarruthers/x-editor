@@ -175,8 +175,8 @@
     "semantic_hash": "abc54d7a231d74fe639f52213eb0412d"
   },
   "apps/editor/src/model/workspaceProblems.ts": {
-    "mtime": 1785495336.5451777,
-    "ast_hash": "3ca24586828cd08e87abe8141d9a3760",
+    "mtime": 1785495881.5594811,
+    "ast_hash": "a5f13cefebfe54eccf82b57882adc432",
     "semantic_hash": ""
   },
   "apps/editor/src/model/xsdAuthoring.ts": {
@@ -195,8 +195,8 @@
     "semantic_hash": ""
   },
   "apps/editor/src/state/store.ts": {
-    "mtime": 1785495361.5268629,
-    "ast_hash": "bc36f4e11aab0b6773a853da9645f9f9",
+    "mtime": 1785495881.5592954,
+    "ast_hash": "50d990375580034ab6c02907604d2fad",
     "semantic_hash": ""
   },
   "apps/editor/src/state/templates.ts": {
@@ -205,8 +205,8 @@
     "semantic_hash": "adae10dedbc67de6712def5dde0e1009"
   },
   "apps/editor/src/state/validation.ts": {
-    "mtime": 1785495361.5266552,
-    "ast_hash": "872621d6c2ae4d551cd31ac1d884cfad",
+    "mtime": 1785495972.5814614,
+    "ast_hash": "4e0c5b03af138b8d236999e384dedc63",
     "semantic_hash": ""
   },
   "apps/editor/src/worker/validation.worker.ts": {
@@ -707,6 +707,11 @@
   "packages/xml-core/test/ns-probe.test.ts": {
     "mtime": 1785494270.266165,
     "ast_hash": "5e99dbaa480a01c80084bf969ad499ad",
+    "semantic_hash": ""
+  },
+  "apps/editor/test/validationQueue.test.ts": {
+    "mtime": 1785495943.082873,
+    "ast_hash": "997fe3abb3ad2fd90ebf796e9b1473ac",
     "semantic_hash": ""
   }
 }

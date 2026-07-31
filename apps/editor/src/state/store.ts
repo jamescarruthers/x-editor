@@ -374,9 +374,8 @@ class EditorStore {
     this.schematron.run();
     this.schematron.runAll(ordered);
 
-    // One worker, one document: the foreground instance. The rest are covered by the guidance
-    // engine and the rules until the queue in PLAN.md §6.2 lands.
-    if (xml !== undefined) this.verdict.request(xml.doc, xml.id);
+    // Every instance, queued foreground-first against the schema already compiled into the worker.
+    if (ordered.length > 0) this.verdict.requestAll(ordered);
   }
 
   /**
@@ -392,8 +391,8 @@ class EditorStore {
     this.engineTimer = setTimeout(() => {
       this.engineTimer = null;
       this.verdict.setSchema(this.schema.sources(), rootUri);
-      const first = this.files.find((file) => file.kind === 'xml');
-      if (first !== undefined) this.verdict.request(first.doc);
+      const instances = this.files.filter((file) => file.kind === 'xml');
+      if (instances.length > 0) this.verdict.requestAll(instances);
     }, 500);
   }
 
