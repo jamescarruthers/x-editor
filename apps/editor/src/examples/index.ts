@@ -4,7 +4,7 @@ import {
   EXAMPLE_SCHEMA,
   EXAMPLE_SCHEMA_NAME,
 } from './purchaseOrder.js';
-import { TOPIC_DOCUMENT, TOPIC_SCHEMA } from './topic.js';
+import { TOPIC_DOCUMENT, TOPIC_METADATA_SCHEMA, TOPIC_SCHEMA } from './topic.js';
 import { INVOICE_DOCUMENT, INVOICE_RULES, INVOICE_SCHEMA } from './invoice.js';
 
 /**
@@ -25,6 +25,18 @@ export interface Example {
   readonly schema: string | null;
   readonly rulesName: string | null;
   readonly rules: string | null;
+  /**
+   * Documents the schema's own `include`/`import` reach for, opened as ordinary workspace files
+   * alongside it.
+   *
+   * Declared here rather than special-cased at the open sites. An earlier version registered
+   * `metadata.xsd` as a hidden supporting buffer keyed on `example.id === 'topic'`, and
+   * `openWorkspace` detaching the schema store wiped it before the schema compiled — so the topic
+   * example opened with an unresolvable import and every verdict read "No schema has been
+   * compiled." A file the schema needs is part of the example, and the workspace holds any number
+   * of schemas now, so it opens as one.
+   */
+  readonly supporting: readonly { name: string; source: string }[];
 }
 
 const PURCHASE_ORDER_DOCUMENT = `<?xml version="1.0" encoding="UTF-8"?>
@@ -62,6 +74,7 @@ export const EXAMPLES: readonly Example[] = [
     schema: EXAMPLE_SCHEMA,
     rulesName: EXAMPLE_RULES_NAME,
     rules: EXAMPLE_RULES,
+    supporting: [],
   },
   {
     id: 'topic',
@@ -74,6 +87,7 @@ export const EXAMPLES: readonly Example[] = [
     schema: TOPIC_SCHEMA,
     rulesName: null,
     rules: null,
+    supporting: [{ name: 'metadata.xsd', source: TOPIC_METADATA_SCHEMA }],
   },
   {
     id: 'invoice',
@@ -86,5 +100,6 @@ export const EXAMPLES: readonly Example[] = [
     schema: INVOICE_SCHEMA,
     rulesName: 'invoice.sch',
     rules: INVOICE_RULES,
+    supporting: [],
   },
 ];

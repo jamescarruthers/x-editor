@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { store } from '../state/store.js';
 import { EXAMPLES, type Example } from '../examples/index.js';
-import { TOPIC_METADATA_SCHEMA } from '../examples/topic.js';
 import { Wizard } from './Wizard.js';
 import { NEW_XML } from '../state/templates.js';
 
@@ -37,10 +36,13 @@ export function StartScreen({
     if (example.schema !== null && example.schemaName !== null) {
       files.push({ name: example.schemaName, source: example.schema });
     }
+    // Supporting schemas open as ordinary files, after the root schema so it stays the one libxml2
+    // compiles from. Registering them as hidden buffers instead is what broke here once:
+    // openWorkspace detaches the schema store, which wiped the buffer before the schema compiled.
+    files.push(...example.supporting);
     if (example.rules !== null && example.rulesName !== null) {
       files.push({ name: example.rulesName, source: example.rules });
     }
-    if (example.id === 'topic') store.schema.addSupporting('metadata.xsd', TOPIC_METADATA_SCHEMA);
 
     store.openWorkspace(files, 'xml');
     onDismiss();

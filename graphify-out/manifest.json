@@ -65,9 +65,9 @@
     "semantic_hash": "551157726cea3d5868edd12113052ebb"
   },
   "apps/editor/src/components/StartScreen.tsx": {
-    "mtime": 1785500180.324446,
-    "ast_hash": "d553f7f86cc588ea302c10b5343b51c2",
-    "semantic_hash": "d553f7f86cc588ea302c10b5343b51c2"
+    "mtime": 1785532364.3270555,
+    "ast_hash": "fde0cab781788d687429c1a03b4b927d",
+    "semantic_hash": ""
   },
   "apps/editor/src/components/TableView.tsx": {
     "mtime": 1785500180.324446,
@@ -80,9 +80,9 @@
     "semantic_hash": "62354aa53b4178fe9612b161b31bfb46"
   },
   "apps/editor/src/components/Wizard.tsx": {
-    "mtime": 1785500180.328446,
-    "ast_hash": "892fc25f228263ca4015b1352ccd2de8",
-    "semantic_hash": "892fc25f228263ca4015b1352ccd2de8"
+    "mtime": 1785532386.275055,
+    "ast_hash": "e9670ae75e5207b36114607b4996a7b9",
+    "semantic_hash": ""
   },
   "apps/editor/src/components/XsdSections.tsx": {
     "mtime": 1785500180.328446,
@@ -90,9 +90,9 @@
     "semantic_hash": "24f97e0988c3db2e543232928f02b18e"
   },
   "apps/editor/src/examples/index.ts": {
-    "mtime": 1785500180.328446,
-    "ast_hash": "32674eb35d78429efd98073854d90479",
-    "semantic_hash": "32674eb35d78429efd98073854d90479"
+    "mtime": 1785532355.1393683,
+    "ast_hash": "5f4bfc1f8ec6819ed4566a6335d6b800",
+    "semantic_hash": ""
   },
   "apps/editor/src/examples/invoice.ts": {
     "mtime": 1785500180.3345962,
@@ -205,8 +205,8 @@
     "semantic_hash": "adae10dedbc67de6712def5dde0e1009"
   },
   "apps/editor/src/state/validation.ts": {
-    "mtime": 1785500180.346587,
-    "ast_hash": "4e0c5b03af138b8d236999e384dedc63",
+    "mtime": 1785532413.7110543,
+    "ast_hash": "35a260ad64a9b65fb6247b23b117fbd6",
     "semantic_hash": ""
   },
   "apps/editor/src/worker/validation.worker.ts": {
@@ -705,8 +705,13 @@
     "semantic_hash": ""
   },
   "apps/editor/test/validationQueue.test.ts": {
-    "mtime": 1785500180.3500965,
-    "ast_hash": "997fe3abb3ad2fd90ebf796e9b1473ac",
+    "mtime": 1785532444.2110536,
+    "ast_hash": "67070e029f70ff17907116084be33289",
+    "semantic_hash": ""
+  },
+  "apps/editor/test/examples.test.ts": {
+    "mtime": 1785532460.7893076,
+    "ast_hash": "1aa75b905ad40e7e0cc9c98e2549f14e",
     "semantic_hash": ""
   }
 }
