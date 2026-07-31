@@ -175,7 +175,7 @@ export function App(): React.JSX.Element {
         style={{ borderColor: 'var(--border-default)', background: 'var(--surface-2)' }}
       >
         <span className="font-semibold">x-editor</span>
-        <FileTabs />
+        <FileTabs onOpenFile={() => fileInput.current?.click()} />
 
         <span
           data-coach="validity"

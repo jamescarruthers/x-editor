@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { renameElement, setAttribute, type NodeId } from '@x-editor/xml-core';
+import {
+  renameElement,
+  setAttribute,
+  setNamespaceDeclaration,
+  type NodeId,
+} from '@x-editor/xml-core';
+import { XSI_NS } from '@x-editor/xsd';
 import { store } from '../src/state/store.js';
 import { nameProblem } from '../src/components/Inspector.js';
 import { attributeValue, globalDeclarations, referenceTextFor } from '../src/model/xsdAuthoring.js';
@@ -137,3 +143,119 @@ describe('changing a declaration type in a schema', () => {
     expect(attributeValue(store.documentFor('xsd')!, declaration, 'type')).toBe('Order');
   });
 });
+
+const HIERARCHY = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="order" type="Order"/>
+  <xs:complexType name="Order">
+    <xs:sequence><xs:element name="payment" type="Payment"/></xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="Payment">
+    <xs:sequence><xs:element name="amount" type="xs:decimal"/></xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CardPayment">
+    <xs:complexContent>
+      <xs:extension base="Payment">
+        <xs:sequence><xs:element name="last4" type="xs:string"/></xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="BankTransfer">
+    <xs:complexContent>
+      <xs:extension base="Payment">
+        <xs:sequence><xs:element name="iban" type="xs:string"/></xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+</xs:schema>`;
+
+const ORDER = `<?xml version="1.0"?>
+<order><payment><amount>10.00</amount></payment></order>`;
+
+describe('choosing between derived types (xsi:type)', () => {
+  beforeEach(() => {
+    store.openWorkspace(
+      [
+        { name: 'order.xml', source: ORDER },
+        { name: 'order.xsd', source: HIERARCHY },
+      ],
+      'xml',
+    );
+  });
+
+  it('enumerates the types an element may claim, which the tree cannot show', () => {
+    // The derivation edge runs from the derived type to the base, so a declaration cannot list its
+    // own substitutes. Enumerating them is the only way to turn that into a choice.
+    const model = store.schema.model!;
+    const declaration = model.globalElement({ namespaceUri: null, localName: 'order' })!;
+    const names = model
+      .typesSubstitutableFor({ namespaceUri: null, localName: 'Payment' }, declaration.origin)
+      .map((n) => n.localName)
+      .sort();
+    expect(names).toEqual(['BankTransfer', 'CardPayment', 'Payment']);
+  });
+
+  it('does not offer a choice where the schema allows none', () => {
+    const model = store.schema.model!;
+    const declaration = model.globalElement({ namespaceUri: null, localName: 'order' })!;
+    // Nothing derives from Order, so the only candidate is Order itself — one entry, no decision.
+    expect(
+      model.typesSubstitutableFor({ namespaceUri: null, localName: 'Order' }, declaration.origin),
+    ).toHaveLength(1);
+  });
+
+  it('a document claiming a derived type stays valid and reports the override', () => {
+    const doc = store.documentFor('xml')!;
+    const payment = doc
+      .childrenOf(doc.documentElement()!)
+      .filter((c) => doc.node(c)?.kind === 'element')[0]!;
+
+    const root = doc.documentElement()!;
+    store.run(setNamespaceDeclaration(doc, root, 'xsi', XSI_NS));
+    store.run(
+      setAttribute(
+        store.documentFor('xml')!,
+        payment,
+        { prefix: 'xsi', localName: 'type', namespaceUri: XSI_NS },
+        'CardPayment',
+      ),
+    );
+
+    // Round-trips, and the engine now resolves the element through the derived type.
+    store.openFile('again.xml', store.document.serialize());
+    expect(store.document.parseErrors).toEqual([]);
+    store.openWorkspace(
+      [
+        { name: 'order.xml', source: store.documentFor('xml')!.serialize() },
+        { name: 'order.xsd', source: HIERARCHY },
+      ],
+      'xml',
+    );
+    const again = store.documentFor('xml')!;
+    const p2 = again.childrenOf(again.documentElement()!).filter((c) => again.node(c)?.kind === 'element')[0]!;
+    const context = store.schema.contextFor(again, p2)!;
+    expect(context.typeOverridden).toBe(true);
+    expect(context.type.name?.localName).toBe('CardPayment');
+  });
+});
+
+describe('renaming inside a rules file', () => {
+  it('allows sch:assert to become sch:report, which is ordinary authoring', () => {
+    store.openWorkspace([{ name: 'r.sch', source: SCH_RULES }], 'sch');
+    expect(store.active).toBe('sch');
+
+    const doc = store.documentFor('sch')!;
+    const scope = doc.inScopeNamespaces(doc.documentElement()!);
+    // The prefix is bound by the rules file itself, so the rename is well-formed.
+    expect(nameProblem('sch:report', scope)).toBeNull();
+    // And a prefix the file never declares is still refused.
+    expect(nameProblem('zz:report', scope)).toContain('not declared here');
+  });
+});
+
+const SCH_RULES = `<?xml version="1.0"?>
+<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">
+  <sch:pattern id="p"><sch:rule context="order">
+    <sch:assert test="true()">ok</sch:assert>
+  </sch:rule></sch:pattern>
+</sch:schema>`;

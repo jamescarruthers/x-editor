@@ -133,7 +133,7 @@ describe('Schematron mode', () => {
   it('runs the rules against the XML file rather than against whatever is in front of you', () => {
     // The bug this replaced: rules were parsed from the *edited* document, so an XML author with
     // rules open alongside got no findings at all.
-    store.activate('xml');
+    store.activateKind('xml');
     expect(store.schematron.active).toBe(true);
     expect(store.schematron.result!.findings.length).toBeGreaterThan(0);
   });

@@ -1,23 +1,23 @@
 # Graph Report - x-editor  (2026-07-31)
 
 ## Corpus Check
-- 136 files · ~147,003 words
+- 137 files · ~151,158 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1583 nodes · 4969 edges · 71 communities (65 shown, 6 thin omitted)
+- 1599 nodes · 5023 edges · 75 communities (69 shown, 6 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 77 edges (avg confidence: 0.82)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `57205a41`
+- Built from commit: `6c0b538c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- ast.ts
-- NodeId
 - xsd/src/index.ts
+- NodeId
+- diagnostics.ts
 - simpleTypes.ts
 - xsdAuthoring.ts
 - xsdRegex.ts
@@ -26,30 +26,33 @@
 - EditorStore
 - validation.ts
 - xml-core/src/index.ts
-- SchemaModel
+- Tree.tsx
 - query.ts
 - insert.ts
-- assemble.ts
+- mixed.ts
 - App.tsx
-- diagnostics.ts
-- Inspector.tsx
-- XsdQName
+- automaton.ts
+- SchemaSections.tsx
+- SchemaModel
 - XmlDocument
 - whatCanGoHere: forward run intersected with backward co-reachability
 - store.ts
 - assembleSchema
 - The anti-drift differential harness
-- CoachMarks.tsx
+- Inspector.tsx
 - paste.ts
 - package.json
 - xsd/package.json
-- interpret.ts
-- scaffold.ts
+- InsertPalette.tsx
+- tokenizer.ts
+- schematron/src/parse.ts
+- wellformed.test.ts
 - compilerOptions
 - compilerOptions
 - Diagnostic interface
 - schematron/package.json
 - xsd-libxml2/package.json
+- xsd/test/differential.test.ts
 - xpath.ts
 - scaffold.test.ts
 - Lossless CST document model, not the DOM
@@ -66,9 +69,10 @@
 - CI build job
 - SchematronSections.tsx
 - validation-protocol/package.json
-- schematron.ts
-- runSchematron
-- validationSerializer.ts
+- SchematronStore
+- interpret.ts
+- qnameToString
+- differential11.test.ts
 - graphify-guard.sh
 - Quick fixes from error-tolerant alignment
 - ProseMirror declined
@@ -88,14 +92,14 @@
 
 ## God Nodes (most connected - your core abstractions)
 1. `NodeId` - 163 edges
-2. `XmlDocument` - 88 edges
+2. `XmlDocument` - 92 edges
 3. `isElement()` - 79 edges
-4. `SchemaModel` - 57 edges
+4. `SchemaModel` - 58 edges
 5. `SchemaParser` - 52 edges
-6. `EditorStore` - 44 edges
-7. `XsdQName` - 39 edges
-8. `elementContext` - 38 edges
-9. `qnameToString()` - 37 edges
+6. `EditorStore` - 51 edges
+7. `XsdQName` - 40 edges
+8. `qnameToString()` - 38 edges
+9. `elementContext` - 38 edges
 10. `qnameKey()` - 36 edges
 
 ## Surprising Connections (you probably didn't know these)
@@ -121,107 +125,107 @@
 - **Favicon Icon Design: badge, glyph and brand colour forming one mark** — apps_editor_public_favicon_app_icon, apps_editor_public_favicon_rounded_square_badge, apps_editor_public_favicon_angle_bracket_glyph, apps_editor_public_favicon_brand_blue_2563eb [EXTRACTED 1.00]
 - **Favicon Design Constraints: vector delivery, tab-size legibility, static asset path** — apps_editor_public_favicon_scalable_vector_favicon, apps_editor_public_favicon_small_size_legibility, apps_editor_public_favicon_static_public_asset, apps_editor_public_favicon_app_icon [INFERRED 0.75]
 
-## Communities (71 total, 6 thin omitted)
+## Communities (75 total, 6 thin omitted)
 
-### Community 0 - "ast.ts"
-Cohesion: 0.15
-Nodes (21): Annotation, AttributeUseKind, CompositionKind, DerivationControl, emptyComponents(), FACET_NAMES, NamespaceToken, qnameEquals() (+13 more)
+### Community 0 - "xsd/src/index.ts"
+Cohesion: 0.08
+Nodes (70): AllContentModel, applyRedefine(), AssembledDocument, normalizePath(), PendingDocument, REDEFINE_NS, RedefineResult, renameType() (+62 more)
 
 ### Community 1 - "NodeId"
-Cohesion: 0.15
-Nodes (5): SchematronParser, NodeId, Form, RawSimpleDerivation, SchemaParser
+Cohesion: 0.14
+Nodes (8): ExplanationStep, GlobalDeclaration, SchematronParser, NodeId, Form, RawAnyAttribute, RawSimpleDerivation, SchemaParser
 
-### Community 2 - "xsd/src/index.ts"
+### Community 2 - "diagnostics.ts"
 Cohesion: 0.10
-Nodes (49): AllContentModel, allFirstInvalidIndex(), allIsValid(), AllMember, allRequiredMissing(), allWhatCanGoHere(), compileAll(), counts() (+41 more)
+Nodes (41): acceptableFrom(), Alignment, alignToModel(), describeEdit(), EditKind, isAccepting(), isPlausibleRename(), key() (+33 more)
 
 ### Community 3 - "simpleTypes.ts"
-Cohesion: 0.06
-Nodes (55): FacetName, RawSimpleType, ANY_SIMPLE_TYPE, applyWhiteSpace(), base64Octets(), BUILT_IN_TYPES, builtInAncestry(), BuiltInFacets (+47 more)
+Cohesion: 0.07
+Nodes (45): isBuiltIn(), ANY_SIMPLE_TYPE, base64Octets(), BUILT_IN_TYPES, builtInAncestry(), BuiltInFacets, builtInName(), builtInType (+37 more)
 
 ### Community 4 - "xsdAuthoring.ts"
-Cohesion: 0.14
-Nodes (38): hasInlineType(), IdentitySection(), RefactorSection(), referenceLabel(), resolveSimpleType(), SchemaHealthSection(), TypeSection(), XsdInspector() (+30 more)
+Cohesion: 0.15
+Nodes (36): hasInlineType(), IdentitySection(), RefactorSection(), referenceLabel(), resolveSimpleType(), SchemaHealthSection(), TypeSection(), XsdInspector() (+28 more)
 
 ### Community 5 - "xsdRegex.ts"
 Cohesion: 0.09
-Nodes (28): CharSet, ClassExpr, complementRanges(), Emitter, enumerable(), escapeInClass(), escapeLiteral(), LITERAL_SPECIALS (+20 more)
+Nodes (26): CharSet, ClassExpr, complementRanges(), Emitter, enumerable(), escapeInClass(), escapeLiteral(), LITERAL_SPECIALS (+18 more)
 
 ### Community 6 - "dependencies"
 Cohesion: 0.05
 Nodes (42): dependencies, react, react-dom, @tanstack/react-virtual, @x-editor/schematron, @x-editor/validation-protocol, @x-editor/xml-core, @x-editor/xsd (+34 more)
 
 ### Community 7 - ".node"
-Cohesion: 0.12
-Nodes (35): DocumentationSection(), appendLiteral(), attribute(), buildComponentRows(), collect(), componentRowLabel(), contentSummary(), Group (+27 more)
+Cohesion: 0.10
+Nodes (42): App(), DocumentationSection(), container, appendLiteral(), attribute(), buildComponentRows(), collect(), componentRowLabel() (+34 more)
 
 ### Community 8 - "EditorStore"
-Cohesion: 0.08
-Nodes (5): Placeholder, Scaffold, EditorStore, expandInitial(), WorkspaceFile
+Cohesion: 0.07
+Nodes (5): Placeholder, EditorStore, expandInitial(), WorkspaceFile, text()
 
 ### Community 9 - "validation.ts"
 Cohesion: 0.09
 Nodes (16): EngineFinding, IDLE, ValidationClient, VerdictState, engine, EngineError, EngineResult, SchemaSource (+8 more)
 
 ### Community 10 - "xml-core/src/index.ts"
-Cohesion: 0.05
-Nodes (86): FlowEditor(), inlineText(), Tree(), TreeRow(), countWords(), describe(), describeElement(), Description (+78 more)
+Cohesion: 0.19
+Nodes (29): NewElementSpec, decodeText(), normalizeAttributeValue(), buildElement(), buildTree(), elementBindings(), qnameSource(), Scope (+21 more)
 
-### Community 11 - "SchemaModel"
-Cohesion: 0.13
-Nodes (11): SchemaSet, NamespaceSpec, RawComplexType, RawFacet, RawParticle, SchemaDiagnostic, applyOccurs(), concatenate() (+3 more)
+### Community 11 - "Tree.tsx"
+Cohesion: 0.23
+Nodes (11): inlineText(), Tree(), TreeRow(), buildRows(), nodeLabel(), Row, textPreview(), expandAll() (+3 more)
 
 ### Community 12 - "query.ts"
-Cohesion: 0.06
-Nodes (72): AttributeField(), childGroups(), ChildGroupSpec, FormNode(), hint(), label(), ValueField(), filterCandidates() (+64 more)
+Cohesion: 0.08
+Nodes (35): FacetsSection(), EditOperation, AllMember, Candidate, Variety, cardinalityChip(), describeCardinality(), describeFacets() (+27 more)
 
 ### Community 13 - "insert.ts"
 Cohesion: 0.13
-Nodes (32): ChildGroup(), Attributes(), AddRow(), Cell(), alignmentCommand(), attributeQName(), commandFor(), commandsForOperation() (+24 more)
+Nodes (32): Attributes(), XsiType(), AddRow(), Cell(), TableView(), alignmentCommand(), attributeQName(), commandFor() (+24 more)
 
-### Community 14 - "assemble.ts"
-Cohesion: 0.18
-Nodes (13): applyRedefine(), normalizePath(), PendingDocument, REDEFINE_NS, renameType(), resolveUri(), rewriteGroupRefs(), rewriteSelfReference() (+5 more)
+### Community 14 - "mixed.ts"
+Cohesion: 0.23
+Nodes (14): FlowEditor(), attributeName(), escapeAttribute(), escapeText(), FlowEdit, flowSource(), inlineNames(), isFlowElement() (+6 more)
 
 ### Community 15 - "App.tsx"
-Cohesion: 0.15
-Nodes (19): App(), Breadcrumb(), RightTab, FormView(), InsertPaletteHost(), Inspector(), DiagnosticRow(), ExplainPanel() (+11 more)
+Cohesion: 0.16
+Nodes (15): Breadcrumb(), RightTab, CoachMarks(), Mark, MARKS, FormView(), InsertPaletteHost(), DiagnosticRow() (+7 more)
 
-### Community 16 - "diagnostics.ts"
-Cohesion: 0.06
-Nodes (74): acceptableFrom(), Alignment, alignToModel(), applyOperations(), describeEdit(), EditKind, EditOperation, isAccepting() (+66 more)
+### Community 16 - "automaton.ts"
+Cohesion: 0.07
+Nodes (59): applyOperations(), allFirstInvalidIndex(), allIsValid(), allRequiredMissing(), allWhatCanGoHere(), compileAll(), counts(), isAllParticle() (+51 more)
 
-### Community 17 - "Inspector.tsx"
-Cohesion: 0.22
-Nodes (4): ElementName(), nameProblem(), ValueEditor(), store
+### Community 17 - "SchemaSections.tsx"
+Cohesion: 0.10
+Nodes (36): AttributeField(), ChildGroup(), childGroups(), ChildGroupSpec, FormNode(), hint(), label(), ValueField() (+28 more)
 
-### Community 18 - "XsdQName"
-Cohesion: 0.13
-Nodes (17): AssembledDocument, RedefineResult, Origin, qnameKey(), RawAttribute, RawAttributeGroup, RawAttributeOwner, RawElement (+9 more)
+### Community 18 - "SchemaModel"
+Cohesion: 0.11
+Nodes (14): particleOf(), formatQName(), Origin, qnameKey(), XsdQName, diagnoseAbstract(), Diagnostic, applyOccurs() (+6 more)
 
 ### Community 20 - "whatCanGoHere: forward run intersected with backward co-reachability"
 Cohesion: 0.10
 Nodes (23): AllContentModel: xs:all is a bitset, not an automaton, Pluggable xs:appinfo interpreter registry, describeParticle / describeType — the guaranteed fallback, whatCanGoHere: forward run intersected with backward co-reachability, Wildcards: processContents drives the UI directly, Xerces XSCMValidator.whatCanGoHere precedent, src/schema/describe.ts — the documentation guarantee, Insert palette specification (+15 more)
 
 ### Community 21 - "store.ts"
-Cohesion: 0.21
-Nodes (12): FileTabs(), countsByFile(), ProblemSeverity, WorkspaceProblem, workspaceProblems(), FILE_KINDS, FILE_LABELS, FileKind (+4 more)
+Cohesion: 0.17
+Nodes (17): FileTabs(), Counts, countsByFile(), countsFor(), NONE, ProblemSeverity, WorkspaceProblem, workspaceProblems() (+9 more)
 
 ### Community 22 - "assembleSchema"
-Cohesion: 0.06
-Nodes (34): compile(), useSelfModel(), SchemaStore, model(), model(), modelOf(), parse(), assembleSchema() (+26 more)
+Cohesion: 0.09
+Nodes (23): useSelfModel(), SchemaStore, model(), model(), modelOf(), parse(), assembleSchema(), catalogueFrom() (+15 more)
 
 ### Community 23 - "The anti-drift differential harness"
 Cohesion: 0.12
 Nodes (21): Install the differential oracles step (xmlschema, lxml), Substitution groups as symbol matchers, never expansion, Unique Particle Attribution and graceful UPA degradation, Differential harness finding: abstract substitution-group head accepted, The anti-drift differential harness, ISO/IEC 19757-3:2025 (Schematron, Edition 4), libxml2 demoted from authoritative validator to fast 1.0 oracle, Explicit disposal of native-memory handles in the worker (+13 more)
 
-### Community 24 - "CoachMarks.tsx"
-Cohesion: 0.50
-Nodes (3): CoachMarks(), Mark, MARKS
+### Community 24 - "Inspector.tsx"
+Cohesion: 0.16
+Nodes (13): ElementName(), Inspector(), nameProblem(), ValueEditor(), countWords(), describe(), describeElement(), Description (+5 more)
 
 ### Community 25 - "paste.ts"
-Cohesion: 0.22
-Nodes (17): commit(), PasteSheetHost(), analysePaste(), applyPaste(), bindingsOf(), countErrors(), describeOption(), elementChildren() (+9 more)
+Cohesion: 0.21
+Nodes (17): commit(), PasteSheetHost(), analysePaste(), applyPaste(), bindingsOf(), describeOption(), elementChildren(), labelOf() (+9 more)
 
 ### Community 26 - "package.json"
 Cohesion: 0.11
@@ -231,13 +235,21 @@ Nodes (18): fast-check, devDependencies, fast-check, playwright, typescript, vit
 Cohesion: 0.11
 Nodes (18): fontoxpath, dependencies, fontoxpath, @x-editor/xml-core, devDependencies, libxml2-wasm, exports, libxml2-wasm (+10 more)
 
-### Community 30 - "interpret.ts"
-Cohesion: 0.17
-Nodes (22): AssertionCounts, AssertionStatistics, EMPTY, NodeRef, RuleStatistics, RunOptions, SchematronFinding, expandPatterns() (+14 more)
+### Community 28 - "InsertPalette.tsx"
+Cohesion: 0.21
+Nodes (16): filterCandidates(), GROUP_LABEL, GROUP_ORDER, groupInOrder(), InsertPalette(), isSubsequence(), plain(), previewOf() (+8 more)
 
-### Community 31 - "scaffold.ts"
-Cohesion: 0.15
-Nodes (16): FillStep(), LoadedSchema, RootStep(), Wizard(), assignPrefixes(), elementChildren(), escapeAttribute(), escapeText() (+8 more)
+### Community 29 - "tokenizer.ts"
+Cohesion: 0.27
+Nodes (10): isBlank(), isWhitespace(), RawAttribute, scanDoctype(), scanStartTag(), Token, tokenize(), TokenizerError (+2 more)
+
+### Community 30 - "schematron/src/parse.ts"
+Cohesion: 0.23
+Nodes (16): expandPatterns(), parseSchematron(), ParseSchematronResult, SCH_NS, SCH_NS_OLD, SchAssertion, SchDiagnosticText, SchLet (+8 more)
+
+### Community 31 - "wellformed.test.ts"
+Cohesion: 0.38
+Nodes (5): checkWellFormed(), isWellFormed(), WellFormednessError, MALFORMED, WELL_FORMED
 
 ### Community 32 - "compilerOptions"
 Cohesion: 0.12
@@ -259,13 +271,17 @@ Nodes (15): dependencies, @x-editor/xml-core, @x-editor/xsd, exports, @x-editor/
 Cohesion: 0.12
 Nodes (15): dependencies, libxml2-wasm, @x-editor/validation-protocol, exports, libxml2-wasm, @x-editor/validation-protocol, main, name (+7 more)
 
+### Community 38 - "xsd/test/differential.test.ts"
+Cohesion: 0.22
+Nodes (7): Case, CASES, CORNER_CASES, OracleError, OracleResult, validateWithLibxml2(), withCatalogue()
+
 ### Community 39 - "xpath.ts"
-Cohesion: 0.13
-Nodes (21): bindLets(), renderMessage(), selectContext(), evaluateBoolean(), evaluateNodes(), evaluateString(), FontoXPath, resolverFor() (+13 more)
+Cohesion: 0.15
+Nodes (17): selectContext(), evaluateBoolean(), evaluateNodes(), FontoXPath, resolverFor(), run(), XPathFailure, XPathFailureDetail (+9 more)
 
 ### Community 40 - "scaffold.test.ts"
-Cohesion: 0.24
-Nodes (10): StartScreen(), Example, EXAMPLES, INVOICE_DOCUMENT, INVOICE_RULES, INVOICE_SCHEMA, TOPIC_DOCUMENT, TOPIC_METADATA_SCHEMA (+2 more)
+Cohesion: 0.12
+Nodes (22): StartScreen(), compile(), FillStep(), LoadedSchema, RootStep(), Wizard(), Example, EXAMPLES (+14 more)
 
 ### Community 41 - "Lossless CST document model, not the DOM"
 Cohesion: 0.18
@@ -319,17 +335,21 @@ Nodes (9): AssertionSection(), attributeValue(), commitAttribute(), RuleSection(
 Cohesion: 0.18
 Nodes (10): exports, main, name, private, scripts, test, typecheck, type (+2 more)
 
-### Community 55 - "schematron.ts"
+### Community 55 - "SchematronStore"
 Cohesion: 0.36
-Nodes (4): SchematronStore, SchematronResult, SchDiagnostic, SchSchema
+Nodes (3): SchematronStore, SchematronResult, SchDiagnostic
 
-### Community 56 - "runSchematron"
+### Community 56 - "interpret.ts"
+Cohesion: 0.18
+Nodes (15): activePatterns(), AssertionCounts, AssertionStatistics, bindLets(), documentOrder(), EMPTY, NodeRef, positionOf() (+7 more)
+
+### Community 57 - "qnameToString"
+Cohesion: 0.23
+Nodes (16): Reference, encodeAttributeValue(), encodeText(), escapeAmpersands(), PREDEFINED, serializeElement(), serializeNode(), qnameToString() (+8 more)
+
+### Community 58 - "differential11.test.ts"
 Cohesion: 0.28
-Nodes (7): activePatterns(), documentOrder(), positionOf(), runSchematron(), shadowingRule(), parseSchematronSource(), run()
-
-### Community 57 - "validationSerializer.ts"
-Cohesion: 0.42
-Nodes (8): attributesOf(), elementChildren(), hasSignificantText(), inlineContent(), nodeForLine(), serializeForValidation(), nameAtLine(), serialize()
+Nodes (6): available, Case, CASES, validateWithXmlschema(), xmlschemaAvailable(), XmlschemaResult
 
 ### Community 60 - "Quick fixes from error-tolerant alignment"
 Cohesion: 0.28
@@ -356,8 +376,8 @@ Cohesion: 0.43
 Nodes (8): Outward Angle Bracket Glyph (white chevron pair), Editor App Favicon (32x32 SVG app icon), Brand Blue #2563eb, Code Editor Visual Identity (brackets as product signifier), Rounded Square Badge (32x32, rx=7, blue fill), Scalable Vector Favicon Strategy, Small-Size Legibility Constraints (heavy stroke, round caps, max contrast), Static public/ Asset Convention
 
 ### Community 68 - "schematron/test/differential.test.ts"
-Cohesion: 0.28
-Nodes (6): available, Case, CASES, isoSchematronAvailable(), IsoSchematronResult, runIsoSchematron()
+Cohesion: 0.19
+Nodes (8): parseSchematronSource(), available, Case, CASES, run(), isoSchematronAvailable(), IsoSchematronResult, runIsoSchematron()
 
 ### Community 69 - "validation-protocol/tsconfig.json"
 Cohesion: 0.25
@@ -388,7 +408,7 @@ Nodes (3): Four-region resizable layout, Inspector section stack and per-documen
   apps/editor/public/favicon.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **239 isolated node(s):** `graphify-guard.sh script`, `graphify-precommit.sh script`, `graphify-setup.sh script`, `name`, `version` (+234 more)
+- **240 isolated node(s):** `graphify-guard.sh script`, `graphify-precommit.sh script`, `graphify-setup.sh script`, `name`, `version` (+235 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **6 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -401,11 +421,11 @@ _Questions this graph is uniquely positioned to answer:_
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **What is the exact relationship between `Rounded Square Badge (32x32, rx=7, blue fill)` and `Code Editor Visual Identity (brackets as product signifier)`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **Why does `NodeId` connect `NodeId` to `ast.ts`, `xsd/src/index.ts`, `xsdAuthoring.ts`, `.node`, `EditorStore`, `validation.ts`, `xml-core/src/index.ts`, `query.ts`, `insert.ts`, `diagnostics.ts`, `Inspector.tsx`, `XsdQName`, `XmlDocument`, `store.ts`, `assembleSchema`, `paste.ts`, `interpret.ts`, `scaffold.ts`, `xpath.ts`, `scaffold.test.ts`, `insert.test.ts`, `CstDomFacade`, `infer.ts`, `SchematronSections.tsx`, `schematron.ts`, `validationSerializer.ts`?**
-  _High betweenness centrality (0.070) - this node is a cross-community bridge._
-- **Why does `XmlDocument` connect `XmlDocument` to `ast.ts`, `NodeId`, `xsdAuthoring.ts`, `.node`, `EditorStore`, `validation.ts`, `xml-core/src/index.ts`, `query.ts`, `insert.ts`, `assemble.ts`, `diagnostics.ts`, `XsdQName`, `store.ts`, `assembleSchema`, `paste.ts`, `interpret.ts`, `scaffold.ts`, `xpath.ts`, `scaffold.test.ts`, `infer.ts`, `schematron.ts`, `runSchematron`, `validationSerializer.ts`, `schematron/test/differential.test.ts`?**
-  _High betweenness centrality (0.060) - this node is a cross-community bridge._
-- **Why does `isElement()` connect `.node` to `ast.ts`, `NodeId`, `xsdAuthoring.ts`, `xpath.ts`, `xml-core/src/index.ts`, `query.ts`, `insert.ts`, `App.tsx`, `diagnostics.ts`, `infer.ts`, `CstDomFacade`, `SchematronSections.tsx`, `assembleSchema`, `schematron.ts`, `paste.ts`, `validationSerializer.ts`, `interpret.ts`, `scaffold.ts`?**
-  _High betweenness centrality (0.020) - this node is a cross-community bridge._
+- **Why does `NodeId` connect `NodeId` to `xsd/src/index.ts`, `diagnostics.ts`, `xsdAuthoring.ts`, `.node`, `EditorStore`, `validation.ts`, `xml-core/src/index.ts`, `Tree.tsx`, `query.ts`, `insert.ts`, `mixed.ts`, `SchemaSections.tsx`, `SchemaModel`, `XmlDocument`, `store.ts`, `assembleSchema`, `Inspector.tsx`, `paste.ts`, `schematron/src/parse.ts`, `xpath.ts`, `scaffold.test.ts`, `insert.test.ts`, `CstDomFacade`, `infer.ts`, `SchematronSections.tsx`, `SchematronStore`, `interpret.ts`, `qnameToString`?**
+  _High betweenness centrality (0.080) - this node is a cross-community bridge._
+- **Why does `XmlDocument` connect `XmlDocument` to `xsd/src/index.ts`, `NodeId`, `diagnostics.ts`, `xsdAuthoring.ts`, `.node`, `EditorStore`, `validation.ts`, `xml-core/src/index.ts`, `Tree.tsx`, `query.ts`, `insert.ts`, `mixed.ts`, `SchemaSections.tsx`, `store.ts`, `assembleSchema`, `Inspector.tsx`, `paste.ts`, `tokenizer.ts`, `schematron/src/parse.ts`, `wellformed.test.ts`, `xsd/test/differential.test.ts`, `xpath.ts`, `scaffold.test.ts`, `CstDomFacade`, `infer.ts`, `SchematronStore`, `interpret.ts`, `qnameToString`, `differential11.test.ts`, `schematron/test/differential.test.ts`?**
+  _High betweenness centrality (0.043) - this node is a cross-community bridge._
+- **Why does `EditorStore` connect `EditorStore` to `xsd/src/index.ts`, `store.ts`, `.node`?**
+  _High betweenness centrality (0.023) - this node is a cross-community bridge._
 - **What connects `graphify-guard.sh script`, `graphify-precommit.sh script`, `graphify-setup.sh script` to the rest of the system?**
-  _239 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _240 weakly-connected nodes found - possible documentation gaps or missing edges._

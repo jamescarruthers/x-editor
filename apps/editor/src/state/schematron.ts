@@ -32,11 +32,24 @@ export class SchematronStore {
   schema: SchSchema | null = null;
   problems: readonly SchDiagnostic[] = [];
 
-  /** The document the rules are tried against — the `.xml` file in the workspace. */
+  /** The document the rules are tried against — the first `.xml` file, for the harness display. */
   sample: XmlDocument | null = null;
   sampleName: string | null = null;
 
+  /**
+   * The run against the sample, which is what the authoring harness shows: match counts, per-rule
+   * statistics, shadowing. One document, because those numbers only mean anything about one.
+   */
   result: SchematronResult | null = null;
+
+  /**
+   * Findings per instance document, which is what the problems list and the file counts read.
+   *
+   * Separate from `result` on purpose. The harness answers "what do these rules do?" about a single
+   * sample; the corpus answers "which of my documents fail?" across all of them, and collapsing the
+   * two would make the statistics meaningless the moment a second file opened.
+   */
+  private byDocument = new Map<number, SchematronResult>();
 
   /** The source the rules were last parsed from, so an unrelated edit does not reparse. */
   private rulesSource: string | null = null;
@@ -70,6 +83,20 @@ export class SchematronStore {
     const parsed = parseSchematron(document);
     this.schema = parsed.schema;
     this.problems = parsed.problems;
+  }
+
+  /** Findings for one instance document. Empty when the rules have not run against it. */
+  findingsFor(id: number): readonly SchematronResult['findings'][number][] {
+    return this.byDocument.get(id)?.findings ?? [];
+  }
+
+  /** Runs the rules over the whole corpus. Cheap: interpretation is in-process, no worker. */
+  runAll(documents: readonly { id: number; doc: XmlDocument }[]): void {
+    this.byDocument.clear();
+    if (this.schema === null) return;
+    for (const entry of documents) {
+      this.byDocument.set(entry.id, runSchematron(this.schema, entry.doc));
+    }
   }
 
   setSample(document: XmlDocument | null, name: string | null): void {

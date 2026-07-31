@@ -21,6 +21,7 @@ import {
   SchemaAttributes,
   SchemaIdentity,
   SchemaValue,
+  XsiType,
 } from './SchemaSections.js';
 
 /**
@@ -75,7 +76,10 @@ export function Inspector({
       </header>
 
       {model !== null && context !== null ? (
-        <SchemaIdentity context={context} model={model} />
+        <>
+          <SchemaIdentity context={context} model={model} />
+          <XsiType context={context} />
+        </>
       ) : (
         <Section title="What is this?">
           <p style={{ color: 'var(--text-secondary)' }}>{description.text}</p>
@@ -144,10 +148,14 @@ export function Inspector({
  * thought you had made a typo, and impossible when you had simply changed your mind; the workaround
  * was delete-and-reinsert, which throws the children away.
  *
- * Offered on the instance document only. In a schema the element name is structure — `xs:complexType`
- * is not a thing anyone means to rename — and the name an author wants there is the `name=`
- * attribute, which the XSD Inspector already edits with reference rewriting behind it. Editing this
- * field instead would silently produce a schema that no longer declares what it used to.
+ * Withheld in a schema, and only there. `xs:complexType` is structure rather than content: nobody
+ * means to rename it, and the name an author wants is the `name=` attribute, which the XSD
+ * Inspector already edits with reference rewriting behind it. Editing this field instead would
+ * silently produce a schema that no longer declares what it used to.
+ *
+ * A rules file is the opposite case, which is why it is allowed. Turning an `sch:assert` into an
+ * `sch:report` — the same test, reported the other way round — is ordinary Schematron authoring,
+ * and without this the only route was deleting it and retyping the expression and message.
  *
  * While you type, a name that will not work is shown in red with the reason on the field — that is
  * where the feedback is useful, because it arrives before you commit to it. Committing one anyway
@@ -160,8 +168,10 @@ function ElementName({ id, name }: { id: NodeId; name: QName }): React.JSX.Eleme
   const [draft, setDraft] = useState(current);
   const [editing, setEditing] = useState(false);
 
-  // The tag name in a schema or a rules file is structure rather than content — see above.
-  if (store.active !== 'xml') {
+  // Only a schema's tag names are structure. In a rules file they are the edit: turning an assert
+  // into a report, or a rule into a pattern, is ordinary Schematron authoring, and the alternative
+  // was delete-and-rewrite with the expression and message retyped by hand.
+  if (store.active === 'xsd') {
     return <span className="truncate text-[15px] font-semibold">{current}</span>;
   }
 

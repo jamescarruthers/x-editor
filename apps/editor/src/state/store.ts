@@ -51,7 +51,10 @@ export const FILE_LABELS: Readonly<Record<FileKind, string>> = {
  * where you were. A workspace that forgets your position every time you check the schema is one you
  * stop checking the schema in.
  */
+export type FileId = number & { readonly __fileId: unique symbol };
+
 interface WorkspaceFile {
+  readonly id: FileId;
   readonly kind: FileKind;
   name: string;
   doc: XmlDocument;
@@ -71,11 +74,21 @@ interface WorkspaceFile {
  * bump.
  */
 class EditorStore {
-  private slots = new Map<FileKind, WorkspaceFile>();
+  /**
+   * Every open file, in open order.
+   *
+   * A list rather than one slot per kind, because the instance documents are the evidence about the
+   * schema being written and there is never only one piece of evidence worth keeping. A workspace
+   * that evicts the last document when you open the next cannot show a known-good and a known-bad
+   * file reacting to the same edit, which is the whole reason someone would open two.
+   *
+   * Phase 9 step 1: many XML, still one XSD and one SCH. See PLAN.md §6.2.
+   */
+  private files: WorkspaceFile[] = [];
+  private nextFileId = 1;
+  private activeFileId: FileId = 1 as FileId;
   private version = 0;
   private listeners = new Set<() => void>();
-
-  active: FileKind = 'xml';
 
   readonly schema = new SchemaStore();
   schemaProblems: readonly SchemaDiagnostic[] = [];
@@ -95,7 +108,6 @@ class EditorStore {
 
   constructor(source: string, fileName: string) {
     this.openFile(fileName, source, { silent: true });
-    this.active = 'xml';
   }
 
   // --- subscription ------------------------------------------------------
@@ -121,14 +133,23 @@ class EditorStore {
    * the accessors below are the whole of the multi-file change as far as they are concerned.
    */
   private get current(): WorkspaceFile {
-    const file = this.slots.get(this.active);
+    const file = this.files.find((entry) => entry.id === this.activeFileId);
     if (file !== undefined) return file;
-    // The active slot can only be empty if a file was closed, in which case another is chosen
-    // immediately. This is a belt-and-braces path so a render can never see a missing document.
-    const first = [...this.slots.values()][0];
+    // Only reachable if a file was closed, in which case another is chosen immediately. Belt and
+    // braces so a render can never see a missing document.
+    const first = this.files[0];
     if (first === undefined) throw new Error('The workspace has no files');
-    this.active = first.kind;
+    this.activeFileId = first.id;
     return first;
+  }
+
+  /** The kind of the file being edited. Kept as `active` so kind-based checks read unchanged. */
+  get active(): FileKind {
+    return this.current.kind;
+  }
+
+  get activeId(): FileId {
+    return this.current.id;
   }
 
   get document(): XmlDocument {
@@ -167,29 +188,49 @@ class EditorStore {
 
   // --- the workspace -----------------------------------------------------
 
-  /** The files that are open, in a fixed order so the tabs never reshuffle. */
-  get openFiles(): readonly { kind: FileKind; name: string }[] {
-    return FILE_KINDS.filter((kind) => this.slots.has(kind)).map((kind) => ({
-      kind,
-      name: this.slots.get(kind)!.name,
-    }));
+  /** Every open file, grouped by kind so the tabs never reshuffle as documents are added. */
+  get openFiles(): readonly { id: FileId; kind: FileKind; name: string }[] {
+    return FILE_KINDS.flatMap((kind) =>
+      this.files
+        .filter((file) => file.kind === kind)
+        .map((file) => ({ id: file.id, kind: file.kind, name: file.name })),
+    );
+  }
+
+  filesOfKind(kind: FileKind): readonly { id: FileId; name: string; doc: XmlDocument }[] {
+    return this.files.filter((file) => file.kind === kind);
   }
 
   has(kind: FileKind): boolean {
-    return this.slots.has(kind);
+    return this.files.some((file) => file.kind === kind);
   }
 
+  /** The first file of a kind. Exact for xsd and sch, which are still single. */
   documentFor(kind: FileKind): XmlDocument | null {
-    return this.slots.get(kind)?.doc ?? null;
+    return this.files.find((file) => file.kind === kind)?.doc ?? null;
   }
 
   nameFor(kind: FileKind): string | null {
-    return this.slots.get(kind)?.name ?? null;
+    return this.files.find((file) => file.kind === kind)?.name ?? null;
   }
 
-  activate(kind: FileKind): void {
-    if (!this.slots.has(kind) || this.active === kind) return;
-    this.active = kind;
+  documentById(id: FileId): XmlDocument | null {
+    return this.files.find((file) => file.id === id)?.doc ?? null;
+  }
+
+  nameById(id: FileId): string | null {
+    return this.files.find((file) => file.id === id)?.name ?? null;
+  }
+
+  /** Activates the single file of a kind. Well-defined while xsd and sch remain single. */
+  activateKind(kind: FileKind): void {
+    const file = this.files.find((entry) => entry.kind === kind);
+    if (file !== undefined) this.activate(file.id);
+  }
+
+  activate(id: FileId): void {
+    if (this.activeFileId === id || !this.files.some((file) => file.id === id)) return;
+    this.activeFileId = id;
     this.emit();
   }
 
@@ -220,6 +261,7 @@ class EditorStore {
     const kind = EditorStore.kindOf(doc);
 
     const file: WorkspaceFile = {
+      id: this.nextFileId++ as FileId,
       kind,
       name: fileName,
       doc,
@@ -229,8 +271,19 @@ class EditorStore {
       componentView: kind === 'xsd',
       placeholders: [],
     };
-    this.slots.set(kind, file);
-    if (options.focus !== false) this.active = kind;
+    // An instance document joins the corpus; a schema or a rule set replaces the one before it.
+    // Steps 2 and 3 of PLAN.md §6.2 lift that restriction; step 1 deliberately does not, so the
+    // validation-scaling problem is met with one schema rather than several at once.
+    if (kind === 'xml') {
+      const sameName = this.files.findIndex((entry) => entry.kind === 'xml' && entry.name === fileName);
+      if (sameName === -1) this.files.push(file);
+      else this.files[sameName] = file;
+    } else {
+      const existing = this.files.findIndex((entry) => entry.kind === kind);
+      if (existing === -1) this.files.push(file);
+      else this.files[existing] = file;
+    }
+    if (options.focus !== false) this.activeFileId = file.id;
     expandInitial(file);
 
     this.sync();
@@ -249,22 +302,30 @@ class EditorStore {
     this.openFile(name, source);
   }
 
-  closeFile(kind: FileKind): void {
-    if (!this.slots.has(kind)) return;
-    if (this.slots.size === 1) return; // never leave the workspace empty
-    this.slots.delete(kind);
-    if (this.active === kind) this.active = [...this.slots.keys()][0]!;
+  closeFile(id: FileId): void {
+    const index = this.files.findIndex((file) => file.id === id);
+    if (index === -1) return;
+    if (this.files.length === 1) return; // never leave the workspace empty
+    this.files.splice(index, 1);
+    if (this.activeFileId === id) this.activeFileId = this.files[Math.min(index, this.files.length - 1)]!.id;
     this.sync();
     this.emit();
   }
 
+  /** Closes the single file of a kind. What the schema and rules tab chips use. */
+  closeKind(kind: FileKind): void {
+    const file = this.files.find((entry) => entry.kind === kind);
+    if (file !== undefined) this.closeFile(file.id);
+  }
+
   /** Replaces the whole workspace — what the start screen's examples do. */
   openWorkspace(files: readonly { name: string; source: string }[], active: FileKind = 'xml'): void {
-    this.slots.clear();
+    this.files = [];
     this.compiledFrom = null;
     this.schema.detach();
     for (const file of files) this.openFile(file.name, file.source, { silent: true });
-    if (this.slots.has(active)) this.active = active;
+    const first = this.files.find((file) => file.kind === active) ?? this.files[0];
+    if (first !== undefined) this.activeFileId = first.id;
     this.sync();
     this.emit();
   }
@@ -279,9 +340,15 @@ class EditorStore {
    * expensive halves and are guarded or debounced.
    */
   private sync(): void {
-    const xsd = this.slots.get('xsd');
-    const xml = this.slots.get('xml');
-    const sch = this.slots.get('sch');
+    const xsd = this.files.find((file) => file.kind === 'xsd');
+    const sch = this.files.find((file) => file.kind === 'sch');
+    const xmlFiles = this.files.filter((file) => file.kind === 'xml');
+    // The active document first when it is an instance: a verdict someone is waiting for should not
+    // queue behind nine they are not looking at.
+    const ordered = [...xmlFiles].sort((a, b) =>
+      a.id === this.activeFileId ? -1 : b.id === this.activeFileId ? 1 : 0,
+    );
+    const xml = ordered[0];
 
     if (xsd === undefined) {
       if (this.compiledFrom !== null) {
@@ -305,8 +372,11 @@ class EditorStore {
     this.schematron.setRules(sch?.doc ?? null);
     this.schematron.setSample(xml?.doc ?? null, xml?.name ?? null);
     this.schematron.run();
+    this.schematron.runAll(ordered);
 
-    if (xml !== undefined) this.verdict.request(xml.doc);
+    // One worker, one document: the foreground instance. The rest are covered by the guidance
+    // engine and the rules until the queue in PLAN.md §6.2 lands.
+    if (xml !== undefined) this.verdict.request(xml.doc, xml.id);
   }
 
   /**
@@ -322,8 +392,8 @@ class EditorStore {
     this.engineTimer = setTimeout(() => {
       this.engineTimer = null;
       this.verdict.setSchema(this.schema.sources(), rootUri);
-      const xml = this.slots.get('xml');
-      if (xml !== undefined) this.verdict.request(xml.doc);
+      const first = this.files.find((file) => file.kind === 'xml');
+      if (first !== undefined) this.verdict.request(first.doc);
     }, 500);
   }
 
@@ -371,11 +441,16 @@ class EditorStore {
     this.emit();
   }
 
-  /** Selects a node in another file, switching to it. What a cross-file problem row does. */
-  reveal(kind: FileKind, id: NodeId): void {
-    const file = this.slots.get(kind);
+  /**
+   * Selects a node in another file, switching to it. What a cross-file problem row does.
+   *
+   * Addressed by file id rather than kind: with several instance documents open, "the XML" is no
+   * longer a destination, and a row that jumped to the wrong one would be worse than inert.
+   */
+  reveal(fileId: FileId, id: NodeId): void {
+    const file = this.files.find((entry) => entry.id === fileId);
     if (file === undefined) return;
-    this.active = kind;
+    this.activeFileId = file.id;
     file.selected = id;
     for (const ancestor of file.doc.ancestorsOf(id)) file.expanded.add(ancestor);
     this.emit();
@@ -429,7 +504,7 @@ class EditorStore {
    */
   loadScaffold(scaffold: Scaffold, fileName: string): void {
     this.openFile(fileName, scaffold.source, { silent: true });
-    const file = this.slots.get('xml');
+    const file = this.files.find((entry) => entry.kind === 'xml');
     if (file !== undefined) {
       file.placeholders = resolvePlaceholders(file.doc, scaffold.placeholders);
       const first = pendingPlaceholders(file.doc, file.placeholders)[0];
@@ -476,7 +551,7 @@ class EditorStore {
   }
 
   detachSchema(): void {
-    this.closeFile('xsd');
+    this.closeKind('xsd');
   }
 
   /** Opening an XML document to try the rules against. */

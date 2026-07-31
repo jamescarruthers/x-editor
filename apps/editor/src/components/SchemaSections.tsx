@@ -15,9 +15,100 @@ import {
   type SchemaModel,
   type Widget,
 } from '@x-editor/xsd';
-import { setAttribute, setTextValue, type NodeId, type QName } from '@x-editor/xml-core';
+import {
+  removeAttribute,
+  setAttribute,
+  setNamespaceDeclaration,
+  setTextValue,
+  type NodeId,
+  type QName,
+} from '@x-editor/xml-core';
+import { XSI_NS, formatQName } from '@x-editor/xsd';
 import { store, useEditor } from '../state/store.js';
 import { applyFix } from '../model/fixes.js';
+
+/**
+ * Which of several permitted types this element actually is — `xsi:type`.
+ *
+ * The case this exists for: a schema declares `<payment type="Payment"/>` and defines
+ * `CardPayment` and `BankTransfer` extending `Payment`. Nothing in the document says which one this
+ * payment is, and nothing in the tree could — the derivation edge runs from the derived type to the
+ * base, so the declaration cannot enumerate its own substitutes. Without this the only route was to
+ * hand-write the attribute and remember that `xsi` needs declaring, which is exactly the expert
+ * knowledge the editor exists to remove.
+ *
+ * Shown only where there is a real choice. A type with no derivations gets no control, because a
+ * dropdown with one entry teaches someone that a decision exists where none does.
+ *
+ * Declaring the namespace is part of setting the attribute, not a separate step the user is left to
+ * discover. `xsi:type` on a document with no `xmlns:xsi` is not a smaller mistake than omitting the
+ * attribute — it does not parse.
+ */
+export function XsiType({ context }: { context: ElementContext }): React.JSX.Element {
+  useEditor();
+  const document = store.document;
+  const model = store.schema.model;
+
+  const declaredName =
+    context.declaration?.typeName ?? (context.type.name !== null ? context.type.name : null);
+
+  const candidates = useMemo(() => {
+    if (model === null || declaredName === null || context.declaration === null) return [];
+    return model.typesSubstitutableFor(declaredName, context.declaration.origin);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.getSnapshot(), model, declaredName]);
+
+  // One candidate means the declared type and nothing else — no decision to offer.
+  if (candidates.length < 2) return <></>;
+
+  const current = context.typeOverridden ? (context.type.name?.localName ?? '') : '';
+
+  const commit = (localName: string): void => {
+    const name: QName = { prefix: 'xsi', localName: 'type', namespaceUri: XSI_NS };
+    if (localName === '') {
+      store.run(removeAttribute(document, context.nodeId, name));
+      return;
+    }
+    // The prefix has to resolve here, so bind it on the root if nothing already has. Writing the
+    // attribute first and the declaration second would leave the document briefly unparseable, and
+    // undo would step through that state.
+    const bound = [...document.inScopeNamespaces(context.nodeId)].some(([, uri]) => uri === XSI_NS);
+    if (!bound) {
+      const root = document.documentElement();
+      if (root !== undefined) store.run(setNamespaceDeclaration(document, root, 'xsi', XSI_NS));
+    }
+    store.run(setAttribute(document, context.nodeId, name, localName));
+  };
+
+  return (
+    <Section title="Which kind is this?">
+      <select
+        value={current}
+        onChange={(event) => commit(event.target.value)}
+        className="w-full rounded border px-1.5 py-1 text-[12px]"
+        style={{
+          borderColor: 'var(--border-default)',
+          background: 'var(--surface-0)',
+          color: 'var(--text-primary)',
+        }}
+      >
+        <option value="">{formatQName(declaredName!)} (as declared)</option>
+        {candidates
+          .filter((candidate) => candidate.localName !== declaredName!.localName)
+          .map((candidate) => (
+            <option key={candidate.localName} value={candidate.localName}>
+              {candidate.localName}
+            </option>
+          ))}
+      </select>
+      <p className="mt-1 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+        {context.typeOverridden
+          ? 'Set by xsi:type on this element. Choosing "as declared" removes it.'
+          : 'The schema allows more specific kinds here. Picking one adds xsi:type.'}
+      </p>
+    </Section>
+  );
+}
 
 /**
  * The schema-aware half of the Inspector.

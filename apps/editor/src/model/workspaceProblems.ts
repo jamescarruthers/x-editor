@@ -1,5 +1,5 @@
 import { ROOT_ID, type NodeId } from '@x-editor/xml-core';
-import { store, type FileKind } from '../state/store.js';
+import { store, type FileId, type FileKind } from '../state/store.js';
 import { documentProblems } from './problems.js';
 import { selfProblems } from './xsdAuthoring.js';
 
@@ -19,6 +19,8 @@ import { selfProblems } from './xsdAuthoring.js';
 export type ProblemSeverity = 'error' | 'warning';
 
 export interface WorkspaceProblem {
+  /** The document this belongs in. A kind is no longer an address — several XML files may be open. */
+  readonly fileId: FileId;
   readonly file: FileKind;
   readonly node: NodeId;
   readonly severity: ProblemSeverity;
@@ -32,11 +34,12 @@ export function workspaceProblems(): WorkspaceProblem[] {
 
   // Well-formedness, per file. A file that does not parse makes every other check about it
   // meaningless, so it is reported first and reported for all three.
-  for (const { kind } of store.openFiles) {
-    const document = store.documentFor(kind);
+  for (const { id, kind } of store.openFiles) {
+    const document = store.documentById(id);
     if (document === null) continue;
     for (const error of document.parseErrors) {
       out.push({
+        fileId: id,
         // A well-formedness error is a position in the text, not a node — the tree could not be
         // built, which is what the error says. It anchors to the document so clicking still
         // switches you to the right file.
@@ -51,10 +54,12 @@ export function workspaceProblems(): WorkspaceProblem[] {
 
   // The schema itself: compilation diagnostics, plus dangling references and ambiguous content
   // models. These belong to the XSD even though they are usually noticed in the XML.
-  const xsd = store.documentFor('xsd');
-  if (xsd !== null) {
+  const xsdFile = store.filesOfKind('xsd')[0];
+  const xsd = xsdFile?.doc ?? null;
+  if (xsd !== null && xsdFile !== undefined) {
     for (const diagnostic of store.schemaProblems) {
       out.push({
+        fileId: xsdFile.id,
         file: 'xsd',
         node: diagnostic.origin.node,
         severity: diagnostic.severity === 'error' ? 'error' : 'warning',
@@ -64,6 +69,7 @@ export function workspaceProblems(): WorkspaceProblem[] {
     }
     for (const problem of selfProblems(xsd, store.schema.model)) {
       out.push({
+        fileId: xsdFile.id,
         file: 'xsd',
         node: problem.node,
         severity: problem.severity,
@@ -73,41 +79,43 @@ export function workspaceProblems(): WorkspaceProblem[] {
     }
   }
 
-  // The instance against the schema, from our engine and from libxml2 — kept apart, because when
-  // they disagree that is the finding rather than a nuisance.
-  const xml = store.documentFor('xml');
-  if (xml !== null && store.schema.model !== null) {
-    for (const diagnostic of documentProblems(store.schema.model, xml)) {
-      out.push({
-        file: 'xml',
-        node: diagnostic.node,
-        severity: diagnostic.severity === 'error' ? 'error' : 'warning',
-        message: diagnostic.message,
-        source: 'schema',
-      });
-    }
-  }
-
+  // The instance half, per document. This is the corpus: one schema and one rule set, checked
+  // against every instance that is open, so a known-good and a known-bad file both react to the
+  // same edit. `documentProblems` is in-process and memoised, so N documents is N cheap queries.
   const verdict = store.verdict.state;
-  if (xml !== null && !verdict.stale) {
-    for (const finding of verdict.findings) {
-      out.push({
-        file: 'xml',
-        node: finding.node,
-        severity: 'error',
-        message: finding.message,
-        source: 'libxml2',
-      });
+  for (const xmlFile of store.filesOfKind('xml')) {
+    if (store.schema.model !== null) {
+      for (const diagnostic of documentProblems(store.schema.model, xmlFile.doc)) {
+        out.push({
+          fileId: xmlFile.id,
+          file: 'xml',
+          node: diagnostic.node,
+          severity: diagnostic.severity === 'error' ? 'error' : 'warning',
+          message: diagnostic.message,
+          source: 'schema',
+        });
+      }
     }
-  }
 
-  // Rule problems land on the XML — that is the document that is wrong — while problems *with* a
-  // rule land on the `.sch`. Putting a failing assert on the rule that raised it would be a list of
-  // the author's own rules rather than a list of what to fix.
-  const result = store.schematron.result;
-  if (result !== null) {
-    for (const finding of result.findings) {
+    // libxml2 still holds one verdict for one document — the queue is the next step. Attributing it
+    // to the wrong file would be worse than withholding it, so it is only shown for the document it
+    // actually ran against.
+    if (!verdict.stale && store.verdict.documentId === xmlFile.id) {
+      for (const finding of verdict.findings) {
+        out.push({
+          fileId: xmlFile.id,
+          file: 'xml',
+          node: finding.node,
+          severity: 'error',
+          message: finding.message,
+          source: 'libxml2',
+        });
+      }
+    }
+
+    for (const finding of store.schematron.findingsFor(xmlFile.id)) {
       out.push({
+        fileId: xmlFile.id,
         file: 'xml',
         node: finding.node,
         severity: finding.role === 'warning' ? 'warning' : 'error',
@@ -117,10 +125,13 @@ export function workspaceProblems(): WorkspaceProblem[] {
     }
   }
 
-  const sch = store.documentFor('sch');
-  if (sch !== null) {
+  const schFile = store.filesOfKind('sch')[0];
+  const sch = schFile?.doc ?? null;
+  const result = store.schematron.result;
+  if (sch !== null && schFile !== undefined) {
     for (const problem of store.schematron.problems) {
       out.push({
+        fileId: schFile.id,
         file: 'sch',
         node: problem.origin.node,
         severity: problem.severity === 'error' ? 'error' : 'warning',
@@ -131,6 +142,7 @@ export function workspaceProblems(): WorkspaceProblem[] {
     for (const statistic of result?.statistics ?? []) {
       if (statistic.shadowedBy !== null) {
         out.push({
+          fileId: schFile.id,
           file: 'sch',
           node: statistic.origin,
           severity: 'warning',
@@ -145,6 +157,7 @@ export function workspaceProblems(): WorkspaceProblem[] {
       for (const assertion of statistic.assertions) {
         if (assertion.broken === null) continue;
         out.push({
+          fileId: schFile.id,
           file: 'sch',
           node: statistic.origin,
           severity: 'error',
@@ -160,6 +173,7 @@ export function workspaceProblems(): WorkspaceProblem[] {
       for (const statistic of result?.statistics ?? []) {
         if (statistic.matched > 0 || statistic.shadowedBy !== null) continue;
         out.push({
+          fileId: schFile.id,
           file: 'sch',
           node: statistic.origin,
           severity: 'warning',
@@ -173,18 +187,33 @@ export function workspaceProblems(): WorkspaceProblem[] {
   return out;
 }
 
-/** Error and warning counts per file, for the tab chips. */
-export function countsByFile(
-  problems: readonly WorkspaceProblem[],
-): Record<FileKind, { errors: number; warnings: number }> {
-  const counts: Record<FileKind, { errors: number; warnings: number }> = {
-    xml: { errors: 0, warnings: 0 },
-    xsd: { errors: 0, warnings: 0 },
-    sch: { errors: 0, warnings: 0 },
-  };
+export interface Counts {
+  readonly errors: number;
+  readonly warnings: number;
+}
+
+const NONE: Counts = { errors: 0, warnings: 0 };
+
+/**
+ * Error and warning counts per document, for the file list.
+ *
+ * Per document rather than per kind, because with a corpus open the number beside each file *is*
+ * the feature: `invoice-bad.xml 3` next to `invoice-good.xml ✓`, both moving when the rules change.
+ */
+export function countsByFile(problems: readonly WorkspaceProblem[]): Map<FileId, Counts> {
+  const counts = new Map<FileId, Counts>();
   for (const problem of problems) {
-    if (problem.severity === 'error') counts[problem.file].errors++;
-    else counts[problem.file].warnings++;
+    const current = counts.get(problem.fileId) ?? NONE;
+    counts.set(
+      problem.fileId,
+      problem.severity === 'error'
+        ? { errors: current.errors + 1, warnings: current.warnings }
+        : { errors: current.errors, warnings: current.warnings + 1 },
+    );
   }
   return counts;
+}
+
+export function countsFor(counts: Map<FileId, Counts>, id: FileId): Counts {
+  return counts.get(id) ?? NONE;
 }
