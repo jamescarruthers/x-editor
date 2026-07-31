@@ -372,6 +372,7 @@ class EditorStore {
       }
     }
 
+    this.schematron.setWorkspace(this.files);
     this.schematron.setAllRules(ruleFiles);
     this.schematron.setSample(xml?.doc ?? null, xml?.name ?? null);
     this.schematron.run();

@@ -15,9 +15,12 @@
  * identity is semantic — `is`, `union`, deduplication and document order all depend on two
  * references to the same node being the same object.
  *
- * Safety falls out of the choice: fontoxpath has no `fn:doc()` unless a resolver is supplied, and no
- * filesystem or network access at all. A hostile `xs:assert` — or a hostile Schematron rule — cannot
- * exfiltrate the document it is inspecting (PLAN.md §8).
+ * Safety mostly falls out of the choice: fontoxpath does not implement `fn:doc()` and has no
+ * filesystem or network access at all. This file *registers* a `doc()` — that is what supplying one
+ * means — but its resolver looks up a map of documents the caller passed in and nothing else, so an
+ * expression can reach exactly the files the user already opened. A hostile `xs:assert` — or a
+ * hostile Schematron rule — still cannot exfiltrate the document it is inspecting (PLAN.md §8):
+ * there is no code path from a rule to the disk or the network.
  */
 
 import {
@@ -53,11 +56,50 @@ export function xpathReady(): boolean {
 export async function loadXPath(): Promise<void> {
   if (engine !== null) return;
   loading ??= import('fontoxpath').then((module) => {
+    registerDocFunction(module);
     engine = module;
     return module;
   });
   await loading;
 }
+
+/**
+ * `doc()` and `document()`, scoped to documents the caller handed over.
+ *
+ * Registered into the *standard* function namespace — `registerCustomXPathFunction` accepts it —
+ * so authors write plain `doc("codes.xml")` and the same `.sch` runs unchanged in another
+ * processor. An editor-specific `x:doc()` would have made every rule using it unportable.
+ *
+ * Registration is global to fontoxpath, but the resolver reads the facade of the evaluation in
+ * flight, so scope is per call: an evaluation given no documents map has a `doc()` that only
+ * throws. Failing loudly is deliberate — an unresolvable `doc()` returning an empty sequence would
+ * make `not(doc('codes.xml')/...)` quietly true, which is the worst possible reading of a typo.
+ */
+function registerDocFunction(module: FontoXPath): void {
+  for (const localName of ['doc', 'document']) {
+    module.registerCustomXPathFunction(
+      { namespaceURI: 'http://www.w3.org/2005/xpath-functions', localName },
+      ['xs:string?'],
+      'node()?',
+      (_context, uri: string | null): XPathNode | null => {
+        if (uri === null) return null;
+        if (activeFacade === null) {
+          throw new Error(`${localName}() is not available here.`);
+        }
+        return activeFacade.resolveDocument(uri, localName);
+      },
+    );
+  }
+}
+
+/**
+ * The facade of the evaluation currently in flight, for `doc()` to resolve through.
+ *
+ * A module variable rather than a fontoxpath option because custom functions are registered once,
+ * globally, and evaluation is synchronous: set on entry to `run`, restored on exit, so the resolver
+ * always sees the workspace of the expression that invoked it and never anyone else's.
+ */
+let activeFacade: CstDomFacade | null = null;
 
 const ELEMENT_NODE = 1;
 const ATTRIBUTE_NODE = 2;
@@ -82,6 +124,12 @@ export interface XPathNode {
   readonly __id: NodeId;
   /** @internal set on attribute adapters. */
   readonly __attribute?: number;
+  /**
+   * @internal the document `__id` belongs to. Node ids are per document, so a node reached through
+   * `doc()` is indistinguishable from a node with the same id in the instance without this tag —
+   * and every facade method dispatches on it rather than on the facade's own document.
+   */
+  readonly __doc: XmlDocument;
 }
 
 /**
@@ -93,11 +141,11 @@ export interface XPathNode {
  * right granularity.
  */
 export class CstDomFacade {
-  // Structurally an `IDomFacade`, but not nominally: fontoxpath's signatures are written against
-  // its own `Element`/`Attr` types, and our adapters carry an extra field those do not know about.
-  // The cast lives at the one call site rather than being spread across every method.
-  private readonly elements = new Map<NodeId, XPathNode>();
-  private readonly attributes = new Map<string, XPathNode>();
+  // Adapter caches are keyed per document: `doc()` brings other documents into the same
+  // evaluation, node ids are only unique within one document, and XPath node identity has to hold
+  // across all of them at once.
+  private readonly elements = new Map<XmlDocument, Map<NodeId, XPathNode>>();
+  private readonly attributes = new Map<XmlDocument, Map<string, XPathNode>>();
 
   /**
    * @param isolate when set, this node behaves as though it has no parent.
@@ -106,24 +154,79 @@ export class CstDomFacade {
    * may not look at its ancestors, because the element has to be checkable independently of where it
    * ends up. Without this, `..` would quietly reach the real parent and an assertion would pass or
    * fail depending on context it is not allowed to see.
+   *
+   * @param workspace what `doc()` may resolve, by file name. `null` — the default — means `doc()`
+   * only throws: scoping is total, because the resolver reads this map and nothing else.
    */
   constructor(
     private readonly doc: XmlDocument,
     private readonly isolate: NodeId | null = null,
+    private readonly workspace: ReadonlyMap<string, XmlDocument> | null = null,
   ) {}
 
-  /** The adapter for a CST node, minted once so XPath node identity holds. */
+  // Structurally an `IDomFacade`, but not nominally: fontoxpath's signatures are written against
+  // its own `Element`/`Attr` types, and our adapters carry extra fields those do not know about.
+  // The cast lives here rather than being spread across every call site.
+  get dom(): IDomFacade {
+    return this as unknown as IDomFacade;
+  }
+
+  /** The adapter for a CST node in the facade's own document. */
   nodeFor(id: NodeId): XPathNode | null {
-    const cached = this.elements.get(id);
+    return this.nodeIn(this.doc, id);
+  }
+
+  /**
+   * What `doc("uri")` resolves to: the document node of an open file, or a loud failure.
+   *
+   * Nothing here reads the disk or the network — an unresolvable name is an error, never a fetch
+   * and never an empty sequence.
+   */
+  resolveDocument(uri: string, functionName: string): XPathNode {
+    const target = this.workspace?.get(uri);
+    if (target === undefined) {
+      throw new Error(
+        this.workspace === null
+          ? `${functionName}("${uri}") is not available here.`
+          : `${functionName}("${uri}") does not name an open file. A rule can only read documents that are open in the workspace.`,
+      );
+    }
+    // A document always has a document node, so the assertion cannot fire.
+    return this.nodeIn(target, ROOT_ID)!;
+  }
+
+  /**
+   * Which workspace file a foreign node came from, or `undefined` for the facade's own document.
+   *
+   * The name rather than the `XmlDocument`, because callers hold findings and selections that must
+   * not silently bind a foreign node id onto the instance — the misbinding fails loudly downstream
+   * only if the ref says which document it meant.
+   */
+  documentNameOf(node: XPathNode): string | undefined {
+    if (node.__doc === this.doc || this.workspace === null) return undefined;
+    for (const [name, candidate] of this.workspace) {
+      if (candidate === node.__doc) return name;
+    }
+    return undefined;
+  }
+
+  /** The adapter for a CST node, minted once per (document, node) so XPath node identity holds. */
+  private nodeIn(doc: XmlDocument, id: NodeId): XPathNode | null {
+    let cache = this.elements.get(doc);
+    if (cache === undefined) {
+      cache = new Map();
+      this.elements.set(doc, cache);
+    }
+    const cached = cache.get(id);
     if (cached !== undefined) return cached;
 
-    const node = this.doc.node(id);
+    const node = doc.node(id);
     if (node === undefined) return null;
 
     let adapter: XPathNode;
     switch (node.kind) {
       case 'document':
-        adapter = { nodeType: DOCUMENT_NODE, __id: id };
+        adapter = { nodeType: DOCUMENT_NODE, __id: id, __doc: doc };
         break;
       case 'element':
         adapter = {
@@ -133,10 +236,11 @@ export class CstDomFacade {
           prefix: node.name.prefix === '' ? null : node.name.prefix,
           nodeName: qnameToString(node.name),
           __id: id,
+          __doc: doc,
         };
         break;
       case 'text':
-        adapter = { nodeType: TEXT_NODE, data: node.value, nodeName: '#text', __id: id };
+        adapter = { nodeType: TEXT_NODE, data: node.value, nodeName: '#text', __id: id, __doc: doc };
         break;
       case 'cdata':
         adapter = {
@@ -144,10 +248,11 @@ export class CstDomFacade {
           data: node.value,
           nodeName: '#cdata-section',
           __id: id,
+          __doc: doc,
         };
         break;
       case 'comment':
-        adapter = { nodeType: COMMENT_NODE, data: node.value, nodeName: '#comment', __id: id };
+        adapter = { nodeType: COMMENT_NODE, data: node.value, nodeName: '#comment', __id: id, __doc: doc };
         break;
       case 'pi':
         adapter = {
@@ -157,6 +262,7 @@ export class CstDomFacade {
           nodeName: node.target,
           localName: node.target,
           __id: id,
+          __doc: doc,
         };
         break;
       default:
@@ -164,18 +270,23 @@ export class CstDomFacade {
         return null;
     }
 
-    this.elements.set(id, adapter);
+    cache.set(id, adapter);
     return adapter;
   }
 
-  private attributeFor(ownerId: NodeId, index: number): XPathNode | null {
-    const key = `${ownerId}:${index}`;
-    const cached = this.attributes.get(key);
+  private attributeFor(owner: XPathNode, index: number): XPathNode | null {
+    let cache = this.attributes.get(owner.__doc);
+    if (cache === undefined) {
+      cache = new Map();
+      this.attributes.set(owner.__doc, cache);
+    }
+    const key = `${owner.__id}:${index}`;
+    const cached = cache.get(key);
     if (cached !== undefined) return cached;
 
-    const owner = this.doc.node(ownerId);
-    if (owner === undefined || !isElement(owner)) return null;
-    const attribute = owner.attributes[index];
+    const element = owner.__doc.node(owner.__id);
+    if (element === undefined || !isElement(element)) return null;
+    const attribute = element.attributes[index];
     if (attribute === undefined) return null;
 
     const adapter: XPathNode = {
@@ -186,17 +297,18 @@ export class CstDomFacade {
       namespaceURI: attribute.name.namespaceUri,
       prefix: attribute.name.prefix === '' ? null : attribute.name.prefix,
       value: attribute.value,
-      __id: ownerId,
+      __id: owner.__id,
       __attribute: index,
+      __doc: owner.__doc,
     };
-    this.attributes.set(key, adapter);
+    cache.set(key, adapter);
     return adapter;
   }
 
   // --- IDomFacade -------------------------------------------------------
 
   getAllAttributes(node: XPathNode): XPathNode[] {
-    const owner = this.doc.node(node.__id);
+    const owner = node.__doc.node(node.__id);
     if (owner === undefined || !isElement(owner)) return [];
 
     const out: XPathNode[] = [];
@@ -205,14 +317,14 @@ export class CstDomFacade {
       // `@*` produce results no XPath author expects.
       const attribute = owner.attributes[index]!;
       if (attribute.name.prefix === 'xmlns' || attribute.name.localName === 'xmlns') continue;
-      const adapter = this.attributeFor(node.__id, index);
+      const adapter = this.attributeFor(node, index);
       if (adapter !== null) out.push(adapter);
     }
     return out;
   }
 
   getAttribute(node: XPathNode, attributeName: string): string | null {
-    const owner = this.doc.node(node.__id);
+    const owner = node.__doc.node(node.__id);
     if (owner === undefined || !isElement(owner)) return null;
     for (const attribute of owner.attributes) {
       if (qnameToString(attribute.name) === attributeName) return attribute.value;
@@ -223,8 +335,8 @@ export class CstDomFacade {
   getChildNodes(node: XPathNode): XPathNode[] {
     if (node.nodeType === ATTRIBUTE_NODE) return [];
     const out: XPathNode[] = [];
-    for (const childId of this.doc.childrenOf(node.__id)) {
-      const adapter = this.nodeFor(childId);
+    for (const childId of node.__doc.childrenOf(node.__id)) {
+      const adapter = this.nodeIn(node.__doc, childId);
       if (adapter !== null) out.push(adapter);
     }
     return out;
@@ -255,25 +367,31 @@ export class CstDomFacade {
   getParentNode(node: XPathNode): XPathNode | null {
     // An attribute's parent is its owning element, even though it is not among that element's
     // children — the one place the XPath data model is not a plain tree.
-    if (node.__attribute !== undefined) return this.nodeFor(node.__id);
-    if (this.isolate !== null && node.__id === this.isolate) return null;
-    const parent = this.doc.parentOf(node.__id);
-    return parent === undefined ? null : this.nodeFor(parent);
+    if (node.__attribute !== undefined) return this.nodeIn(node.__doc, node.__id);
+    if (this.isolated(node)) return null;
+    const parent = node.__doc.parentOf(node.__id);
+    return parent === undefined ? null : this.nodeIn(node.__doc, parent);
+  }
+
+  // The isolate is a node of the facade's own document; a node with the same id reached through
+  // `doc()` is a different node and must not inherit the isolation.
+  private isolated(node: XPathNode): boolean {
+    return this.isolate !== null && node.__doc === this.doc && node.__id === this.isolate;
   }
 
   private sibling(node: XPathNode, offset: number): XPathNode | null {
     if (node.__attribute !== undefined) return null;
-    if (this.isolate !== null && node.__id === this.isolate) return null;
-    const parent = this.doc.parentOf(node.__id);
+    if (this.isolated(node)) return null;
+    const parent = node.__doc.parentOf(node.__id);
     if (parent === undefined) return null;
 
-    const siblings = this.doc.childrenOf(parent);
+    const siblings = node.__doc.childrenOf(parent);
     const index = siblings.indexOf(node.__id);
     if (index < 0) return null;
 
     // Skip anything with no place in the XPath data model rather than returning null at it.
     for (let cursor = index + offset; cursor >= 0 && cursor < siblings.length; cursor += offset) {
-      const adapter = this.nodeFor(siblings[cursor]!);
+      const adapter = this.nodeIn(node.__doc, siblings[cursor]!);
       if (adapter !== null) return adapter;
     }
     return null;
@@ -293,6 +411,14 @@ export interface XPathOptions {
    * Schematron rules are not.
    */
   readonly isolate?: NodeId;
+  /**
+   * What `doc()` / `document()` may reach, by file name — the open workspace, supplied by the one
+   * caller entitled to grant it. Left unset, `doc()` fails loudly rather than resolving anything:
+   * XSD 1.1 assertions and the syntax checker never pass this, so a schema's assertions cannot read
+   * other files even though Schematron rules in the same session can. Explicit `undefined` is
+   * allowed so a caller can thread an optional workspace through without spreading at every site.
+   */
+  readonly documents?: ReadonlyMap<string, XmlDocument> | undefined;
 }
 
 export interface XPathFailure {
@@ -330,7 +456,7 @@ export function evaluateBoolean(
   options: XPathOptions = {},
 ): XPathOutcome<boolean> {
   return run(document, contextId, options, (context, facade, variables, evaluationOptions) =>
-    engine!.evaluateXPathToBoolean(expression, context, facade, variables, evaluationOptions),
+    engine!.evaluateXPathToBoolean(expression, context, facade.dom, variables, evaluationOptions),
   );
 }
 
@@ -345,6 +471,12 @@ export function evaluateBoolean(
 export interface XPathNodeRef {
   readonly node: NodeId;
   readonly attribute?: number;
+  /**
+   * Set when the node lives in another open document, reached through `doc()`. Node ids are per
+   * document, so a ref carrying this name must never be looked up in the instance — callers that
+   * can only address the instance skip these rather than misbinding silently.
+   */
+  readonly documentName?: string;
 }
 
 export function evaluateNodes(
@@ -354,12 +486,16 @@ export function evaluateNodes(
   options: XPathOptions = {},
 ): XPathOutcome<XPathNodeRef[]> {
   return run(document, contextId, options, (context, facade, variables, evaluationOptions) =>
-    engine!.evaluateXPathToNodes<XPathNode>(expression, context, facade, variables, evaluationOptions).map(
-      (node): XPathNodeRef =>
-        node.__attribute === undefined
-          ? { node: node.__id }
-          : { node: node.__id, attribute: node.__attribute },
-    ),
+    engine!
+      .evaluateXPathToNodes<XPathNode>(expression, context, facade.dom, variables, evaluationOptions)
+      .map((node): XPathNodeRef => {
+        const documentName = facade.documentNameOf(node);
+        return {
+          node: node.__id,
+          ...(node.__attribute === undefined ? {} : { attribute: node.__attribute }),
+          ...(documentName === undefined ? {} : { documentName }),
+        };
+      }),
   );
 }
 
@@ -370,7 +506,7 @@ export function evaluateString(
   options: XPathOptions = {},
 ): XPathOutcome<string> {
   return run(document, contextId, options, (context, facade, variables, evaluationOptions) =>
-    engine!.evaluateXPathToString(expression, context, facade, variables, evaluationOptions),
+    engine!.evaluateXPathToString(expression, context, facade.dom, variables, evaluationOptions),
   );
 }
 
@@ -380,7 +516,7 @@ function run<T>(
   options: XPathOptions,
   body: (
     context: XPathNode,
-    facade: IDomFacade,
+    facade: CstDomFacade,
     variables: Record<string, unknown>,
     evaluationOptions: { namespaceResolver: (prefix: string) => string | null },
   ) => T,
@@ -392,16 +528,20 @@ function run<T>(
     };
   }
 
-  const facade = new CstDomFacade(document, options.isolate ?? null);
+  const facade = new CstDomFacade(document, options.isolate ?? null, options.documents ?? null);
   const context = facade.nodeFor(contextId) ?? facade.nodeFor(ROOT_ID);
   if (context === null) {
     return { ok: false, error: { message: 'The context node no longer exists.' } };
   }
 
+  // Saved and restored rather than set and cleared, so an evaluation started from inside another
+  // one — however unlikely — resolves `doc()` against its own workspace, not its caller's.
+  const previous = activeFacade;
+  activeFacade = facade;
   try {
     return {
       ok: true,
-      value: body(context, facade as unknown as IDomFacade, { ...(options.variables ?? {}) }, {
+      value: body(context, facade, { ...(options.variables ?? {}) }, {
         namespaceResolver: resolverFor(options),
       }),
     };
@@ -410,6 +550,8 @@ function run<T>(
       ok: false,
       error: { message: error instanceof Error ? error.message : String(error) },
     };
+  } finally {
+    activeFacade = previous;
   }
 }
 

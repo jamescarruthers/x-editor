@@ -74,6 +74,19 @@ export class SchematronStore {
   /** The source the rules were last parsed from, so an unrelated edit does not reparse. */
   private rulesSource: string | null = null;
 
+  /**
+   * Every open file by name — what `doc()` in a rule may reach, and nothing else.
+   *
+   * All kinds, not just instances: an XSD is XML, and a rule set pointed at `order.xsd` enforcing
+   * schema-design conventions is a use the plan names. The scoping is the security decision from
+   * PLAN.md §6.2 step 4 — a rule reads files the user already opened, never the disk.
+   */
+  private workspace: ReadonlyMap<string, XmlDocument> = new Map();
+
+  setWorkspace(files: readonly { name: string; doc: XmlDocument }[]): void {
+    this.workspace = new Map(files.map((file) => [file.name, file.doc]));
+  }
+
   /** True when there are rules to run. */
   get active(): boolean {
     return this.schema !== null;
@@ -165,7 +178,7 @@ export class SchematronStore {
       const findings: SchematronResult['findings'][number][] = [];
       const statistics: SchematronResult['statistics'][number][] = [];
       for (const [setId, set] of this.ruleSets) {
-        const result = runSchematron(set.schema, entry.doc);
+        const result = runSchematron(set.schema, entry.doc, { documents: this.workspace });
         findings.push(...result.findings);
         statistics.push(...result.statistics);
         // Statistics come from the first document only: "does this context match anything?" is a
@@ -189,7 +202,7 @@ export class SchematronStore {
       this.result = null;
       return;
     }
-    this.result = runSchematron(this.schema, this.sample);
+    this.result = runSchematron(this.schema, this.sample, { documents: this.workspace });
   }
 
   /** What a rule did, found by the node it was written at. */
