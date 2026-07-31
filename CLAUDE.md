@@ -31,6 +31,18 @@ A graph that silently describes an older version of the tree is worse than an ob
 so if `graphify query` returns something that contradicts the file in front of you, trust the file
 and re-run the update.
 
+### Do not run `graphify label` here
+
+Community names — `particles.ts`, `NodeId`, `xsdRegex.ts` — are **hub-derived on purpose**: each
+community is named after its most connected node. That is deterministic, free, and never goes stale.
+
+`graphify label` replaces them with LLM-written names, and needs an API key to do it. With no
+`GEMINI_API_KEY` or `GOOGLE_API_KEY` set, as here, it does not decline — it re-clusters the whole
+graph and writes `Community N` placeholders, which is strictly worse than what it replaced. Running
+it once cost this project its first set of curated names.
+
+If you want prose names, set a key first and use `--missing-only`. Otherwise leave labels alone.
+
 ### If graphify is missing
 
 `.claude/graphify-setup.sh` runs at session start and installs it. Nothing needs doing by hand. The

@@ -695,8 +695,8 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1785492850.946944,
-    "ast_hash": "46026492396070a673e256651fc90be9",
+    "mtime": 1785493599.2509267,
+    "ast_hash": "69d33c7c385bc309a9335fdf64acdff3",
     "semantic_hash": ""
   },
   ".claude/graphify-precommit.sh": {
