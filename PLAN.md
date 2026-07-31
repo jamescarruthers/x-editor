@@ -530,7 +530,36 @@ Deliberately not one change.
    pattern*, so two files never shadow each other, and merging would invent shadowing ISO does not
    describe and quietly silence rules. Parse problems and per-rule statistics — shadowing, dead
    contexts, broken expressions — are kept per rule set, since each one names a file to go and fix.
-4. **`document()`, scoped to the workspace.** Separate, because it is a threat-model change.
+4. **`document()`, scoped to the workspace.** Separate, because it is a threat-model change. Agreed
+   in principle: a rule may reach a file the user has already opened, and nothing else. Two findings
+   from the spike, both of which change how it should be built:
+
+   **`fn:doc` can be registered into the standard namespace.** `registerCustomXPathFunction` accepts
+   `{namespaceURI: 'http://www.w3.org/2005/xpath-functions', localName: 'doc'}` and the expression
+   `doc("codes.xml")` then resolves through it — verified against fontoxpath 3.34.0. So the
+   capability does not need an editor-specific `x:doc()` that would make every rule using it
+   unportable; authors write standard `doc()` / `document()` and the same `.sch` runs in another
+   processor. The resolver is ours, so scoping is total: it looks up the open workspace and there is
+   no code path to disk or network.
+
+   Note that §8's phrasing — "fontoxpath has no `fn:doc()` unless a resolver is supplied" — is
+   imprecise. There is no resolver option; fontoxpath simply does not implement `fn:doc`, and
+   registering one is what supplies it.
+
+   **The real work is the facade, not the resolver.** `CstDomFacade` wraps one `XmlDocument` and
+   every `XPathNode` carries `__id: NodeId`. Node ids are per document, so a node from `codes.xml`
+   is indistinguishable from a node with the same id in the instance. Cross-document evaluation
+   needs each node adapter tagged with its document and all eleven facade methods dispatching on
+   that tag, plus a document-aware `XPathNodeRef` and its five callers.
+
+   Findings stay bound to the instance, which keeps the change smaller than it first looks: a rule
+   uses `doc()` inside a `test=` to *look up* a value, while the assertion still fires on a node in
+   the document being validated. The other document needs to be traversable and readable, not
+   addressable by the UI.
+
+   *Done when:* a rule in one file can compare a value in an instance against a value in another
+   open document; a `doc()` naming a file that is not open fails loudly rather than returning an
+   empty sequence; and nothing reachable from a rule can read a file the user has not opened.
 
 **Status:** steps 1–3 are done; step 4 is not started. Every kind now accumulates.
 
