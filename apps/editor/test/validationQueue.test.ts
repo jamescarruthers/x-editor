@@ -56,6 +56,9 @@ beforeEach(() => {
   (globalThis as { Worker?: unknown }).Worker = FakeWorker;
   client = new ValidationClient(() => {});
   client.setSchema([{ uri: 's.xsd', text: '<xs:schema/>' }] as never, 's.xsd');
+  // Nothing is posted until the worker says ready — its module top-level-awaits the WASM, and a
+  // message posted into that window is dispatched to no listener and lost.
+  FakeWorker.live.at(-1)!.reply({ type: 'ready' });
   FakeWorker.live.at(-1)!.reply({ type: 'schemaCompiled', ok: true, errors: [] });
 });
 
@@ -175,6 +178,7 @@ describe('a schema that does not compile', () => {
   const failCompile = (): FakeWorker => {
     client.setSchema([{ uri: 'bad.xsd', text: '<xs:schema/>' }] as never, 'bad.xsd');
     const worker = FakeWorker.live.at(-1)!;
+    worker.reply({ type: 'ready' });
     worker.reply({
       type: 'schemaCompiled',
       ok: false,
@@ -222,5 +226,27 @@ describe('a schema that does not compile', () => {
     expect(client.state.status).toBe('failed');
     expect(client.state.message).toBe('the informative compile error');
     expect(client.stateFor(1)).toBeNull();
+  });
+});
+
+describe('the startup handshake', () => {
+  it('posts nothing — not even the schema — until the worker says ready', () => {
+    // The worker module top-level-awaits its WASM instantiation, and a module worker's port is
+    // enabled at that first await, before the worker's message listener exists. A compileSchema
+    // posted into that window is silently lost, after which every verdict is the engine's generic
+    // "No schema has been compiled." — the bug this pins, seen on every example on a slow start.
+    client.setSchema([{ uri: 's.xsd', text: '<xs:schema/>' }] as never, 's.xsd');
+    const worker = FakeWorker.live.at(-1)!;
+    client.requestAll([{ id: 1, doc: doc('<a/>') }]);
+    vi.advanceTimersByTime(200);
+
+    expect(worker.posted).toHaveLength(0);
+
+    worker.reply({ type: 'ready' });
+    expect(worker.posted.map((message) => message.type)).toEqual(['compileSchema', 'validate']);
+
+    worker.reply({ type: 'schemaCompiled', ok: true, errors: [] });
+    worker.reply({ type: 'validated', revision: worker.validations[0]!.revision, valid: true, errors: [] });
+    expect(client.stateFor(1)?.valid).toBe(true);
   });
 });
