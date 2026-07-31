@@ -744,6 +744,44 @@ export class SchemaModel {
   }
 
   /**
+   * The named types an instance may claim through `xsi:type` where `base` is declared.
+   *
+   * The set is every global type that reaches `base` by extension or restriction, `base` itself
+   * included — an instance is always allowed to state the type it already has, and an author
+   * choosing from a list expects to see the one currently in effect.
+   *
+   * A schema declares `<payment type="Payment"/>` and defines `CardPayment` extending `Payment`;
+   * nothing in the tree says a payment element may *be* a card payment, because the edge runs the
+   * other way. Enumerating derivations is the only way to turn that into a choice someone can make,
+   * and it is why this is a method on the model rather than something the UI could work out.
+   *
+   * `block` is honoured: a base that blocks a derivation method forbids substituting through it, and
+   * offering a type the validator will reject is worse than offering nothing.
+   */
+  typesSubstitutableFor(base: XsdQName, origin: Origin): readonly XsdQName[] {
+    const target = this.symbols.normalize(base, origin);
+    const declared = this.typeByName(target, origin);
+    const blocked = declared.form === 'complex' ? declared.block : null;
+
+    const out: XsdQName[] = [];
+    for (const candidate of this.symbols.globalTypes()) {
+      const compiled = this.typeByName(candidate.name, { documentUri: candidate.documentUri, node: origin.node });
+      if (!this.isDerivedFrom(compiled, target, origin)) continue;
+      if (
+        blocked !== null &&
+        compiled !== declared &&
+        compiled.form === 'complex' &&
+        compiled.derivationMethod !== null &&
+        derivationSetHas(blocked, compiled.derivationMethod)
+      ) {
+        continue;
+      }
+      out.push(candidate.name);
+    }
+    return out;
+  }
+
+  /**
    * Whether an element may be replaced by `member` through its substitution group.
    *
    * `block="substitution"` on the head is the reason this is a method rather than a set lookup: a

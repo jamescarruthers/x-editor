@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import {
   XmlDocument,
+  setNamespaceDeclaration,
   insertElement,
   insertText,
   moveNode,
@@ -232,5 +233,38 @@ describe('property: apply then invert is the identity', () => {
       }),
       { numRuns: 300 },
     );
+  });
+});
+
+describe('setNamespaceDeclaration', () => {
+  it('reaches the serialized document, not just the in-memory prefix table', () => {
+    // The bug this pins: a declaration lives both in `namespaceDeclarations` and in the element's
+    // ordinary attributes, and the command used to update only the first. Prefixes resolved in
+    // memory while nothing reached the file, so anything written beside it — an `xsi:type`, say —
+    // produced a document that no longer parsed. Invisible until reload, which is why it is here.
+    const doc = XmlDocument.parse('<order><payment/></order>');
+    const root = doc.documentElement()!;
+    doc.run(setNamespaceDeclaration(doc, root, 'xsi', 'http://www.w3.org/2001/XMLSchema-instance'));
+
+    const text = doc.serialize();
+    expect(text).toContain('xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"');
+    expect(XmlDocument.parse(text).parseErrors).toEqual([]);
+  });
+
+  it('undoes cleanly, leaving the original bytes', () => {
+    const source = '<order><payment/></order>';
+    const doc = XmlDocument.parse(source);
+    doc.run(setNamespaceDeclaration(doc, doc.documentElement()!, 'xsi', 'urn:x'));
+    doc.undo();
+    expect(doc.serialize()).toBe(source);
+  });
+
+  it('rebinds an existing prefix rather than declaring it twice', () => {
+    const doc = XmlDocument.parse('<order xmlns:p="urn:old"/>');
+    doc.run(setNamespaceDeclaration(doc, doc.documentElement()!, 'p', 'urn:new'));
+    const text = doc.serialize();
+    expect(text).toContain('urn:new');
+    expect(text).not.toContain('urn:old');
+    expect(text.match(/xmlns:p=/g)).toHaveLength(1);
   });
 });

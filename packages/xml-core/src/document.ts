@@ -1,4 +1,4 @@
-import { buildTree } from './parse.js';
+import { XMLNS_NS, buildTree } from './parse.js';
 import { serializeNode } from './serialize.js';
 import {
   ROOT_ID,
@@ -452,6 +452,20 @@ export function setNamespaceDeclaration(
       ? `Set the default namespace to ${uri}`
       : `Declared xmlns:${prefix}="${uri}"`;
 
+  // A declaration lives in two places: this parallel list, which everything resolving a prefix
+  // reads, and the element's ordinary attributes, which is what the serializer writes — `xmlns:p`
+  // is syntactically an attribute and the parser stores it as one. Updating only the list left the
+  // command a silent no-op: prefixes resolved in memory and nothing reached the file, so an
+  // `xsi:type` added beside it produced a document that no longer parsed. Both are maintained here,
+  // and the round trip is asserted in the tests, because the failure is invisible until reload.
+  const attributeName: QName = prefix === ''
+    ? { prefix: '', localName: 'xmlns', namespaceUri: XMLNS_NS }
+    : { prefix: 'xmlns', localName: prefix, namespaceUri: XMLNS_NS };
+  const attributeIndex = node.attributes.findIndex(
+    (a) => qnameToString(a.name) === qnameToString(attributeName),
+  );
+  const previousAttribute = attributeIndex === -1 ? null : { ...node.attributes[attributeIndex]! };
+
   return {
     label,
     affected: id,
@@ -459,12 +473,17 @@ export function setNamespaceDeclaration(
       const target = d.expect(id);
       if (target.kind !== 'element') return;
       target.namespaceDeclarations = [...after];
+      const next = { name: attributeName, value: uri, raw: null, quote: '"' as const };
+      if (attributeIndex === -1) target.attributes.push(next);
+      else target.attributes[attributeIndex] = next;
       d.markDirty(id);
     },
     invert: (d) => {
       const target = d.expect(id);
       if (target.kind !== 'element') return;
       target.namespaceDeclarations = [...before];
+      if (previousAttribute === null) target.attributes.pop();
+      else target.attributes[attributeIndex] = previousAttribute;
       d.markDirty(id);
     },
   };

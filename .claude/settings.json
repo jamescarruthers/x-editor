@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh .claude/graphify-setup.sh"
+            "command": "sh -c 'r=$(git rev-parse --show-toplevel 2>/dev/null || pwd); sh \"$r/.claude/graphify-setup.sh\"'"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh .claude/graphify-guard.sh search"
+            "command": "sh -c 'r=$(git rev-parse --show-toplevel 2>/dev/null || pwd); [ -f \"$r/.claude/graphify-guard.sh\" ] && sh \"$r/.claude/graphify-guard.sh\" search; exit 0'"
           }
         ]
       },
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh .claude/graphify-guard.sh read"
+            "command": "sh -c 'r=$(git rev-parse --show-toplevel 2>/dev/null || pwd); [ -f \"$r/.claude/graphify-guard.sh\" ] && sh \"$r/.claude/graphify-guard.sh\" read; exit 0'"
           }
         ]
       }
