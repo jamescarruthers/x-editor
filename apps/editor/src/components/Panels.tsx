@@ -252,8 +252,8 @@ export function ProblemsPanel(): React.JSX.Element {
           message={problem.message}
           // The file is on every row, because the whole point of holding three together is that the
           // cause of a problem is often not in the file you are looking at.
-          detail={`${FILE_LABELS[problem.file]} · ${store.nameFor(problem.file) ?? ''} · ${problem.source}`}
-          onClick={() => store.reveal(problem.file, problem.node)}
+          detail={`${store.nameById(problem.fileId) ?? FILE_LABELS[problem.file]} · ${problem.source}`}
+          onClick={() => store.reveal(problem.fileId, problem.node)}
           dim={problem.source === 'libxml2' && verdict.stale}
         />
       ))}

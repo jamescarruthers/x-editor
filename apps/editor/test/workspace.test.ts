@@ -2,7 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadXPath } from '@x-editor/xsd';
 import { setAttribute, setTextValue } from '@x-editor/xml-core';
 import { store } from '../src/state/store.js';
-import { workspaceProblems, countsByFile } from '../src/model/workspaceProblems.js';
+import { workspaceProblems, countsByFile, countsFor } from '../src/model/workspaceProblems.js';
 import { NEW_SCH, NEW_XML, NEW_XSD } from '../src/state/templates.js';
 import { EXAMPLES } from '../src/examples/index.js';
 
@@ -77,26 +77,26 @@ describe('the workspace', () => {
   it('holds three files at once, each with its own selection', () => {
     expect(store.openFiles.map((file) => file.kind)).toEqual(['xml', 'xsd', 'sch']);
 
-    store.activate('xsd');
+    store.activateKind('xsd');
     store.select(at('xsd', [1]));
     const inSchema = store.selected;
 
-    store.activate('xml');
+    store.activateKind('xml');
     store.select(at('xml', [0]));
     const inDocument = store.selected;
 
     // Switching back returns you to where you were. A workspace that forgets is one you stop
     // switching in.
-    store.activate('xsd');
+    store.activateKind('xsd');
     expect(store.selected).toBe(inSchema);
-    store.activate('xml');
+    store.activateKind('xml');
     expect(store.selected).toBe(inDocument);
   });
 
   it('never leaves the workspace empty', () => {
-    store.closeFile('xsd');
-    store.closeFile('sch');
-    store.closeFile('xml');
+    store.closeKind('xsd');
+    store.closeKind('sch');
+    store.closeKind('xml');
     expect(store.openFiles.length).toBe(1);
   });
 
@@ -132,16 +132,14 @@ describe('errors that cross files', () => {
   beforeEach(workspace);
 
   it('starts clean', () => {
-    const counts = countsByFile(workspaceProblems());
-    expect(counts.xml.errors).toBe(0);
-    expect(counts.xsd.errors).toBe(0);
-    expect(counts.sch.errors).toBe(0);
+    const problems = workspaceProblems();
+    expect(problems.filter((problem) => problem.severity === 'error')).toEqual([]);
   });
 
   it('an edit to the schema invalidates the document, and says so against the XML', () => {
     // The whole reason for holding three files at once. Nothing about the XML changed; it is now
     // wrong because of something typed two tabs away.
-    store.activate('xsd');
+    store.activateKind('xsd');
     store.run(
       setAttribute(
         store.documentFor('xsd')!,
@@ -160,7 +158,7 @@ describe('errors that cross files', () => {
   it('an edit to the document is checked against the rules in the other file', () => {
     // The capability that was missing entirely: rules used to be parsed from whichever document was
     // being edited, so an XML author with rules open alongside got no findings at all.
-    store.activate('xml');
+    store.activateKind('xml');
     const qty = at('xml', [1]);
     const text = store.documentFor('xml')!.childrenOf(qty)[0]!;
     store.run(setTextValue(store.documentFor('xml')!, text, '25'));
@@ -175,7 +173,7 @@ describe('errors that cross files', () => {
   });
 
   it('attributes a broken rule to the rules file, not to the document', () => {
-    store.activate('sch');
+    store.activateKind('sch');
     store.run(
       setAttribute(
         store.documentFor('sch')!,
@@ -192,7 +190,7 @@ describe('errors that cross files', () => {
   });
 
   it('reports a dangling reference against the schema that has it', () => {
-    store.activate('xsd');
+    store.activateKind('xsd');
     store.run(
       setAttribute(
         store.documentFor('xsd')!,
@@ -209,13 +207,13 @@ describe('errors that cross files', () => {
   });
 
   it('clears the schema when its file is closed', () => {
-    store.closeFile('xsd');
+    store.closeKind('xsd');
     expect(store.schema.model).toBeNull();
     expect(workspaceProblems().filter((problem) => problem.source === 'schema')).toEqual([]);
   });
 
   it('stops running the rules when their file is closed', () => {
-    store.closeFile('sch');
+    store.closeKind('sch');
     expect(store.schematron.active).toBe(false);
     expect(store.schematron.result).toBeNull();
   });
@@ -247,5 +245,80 @@ describe('the bundled examples', () => {
     expect(
       problems.filter((problem) => problem.file === 'xml' && problem.source === 'schema'),
     ).toEqual([]);
+  });
+});
+
+describe('a corpus of instance documents', () => {
+  const GOOD = `<?xml version="1.0"?>\n<order><ref>A-1</ref><qty>2</qty></order>`;
+  const BAD = `<?xml version="1.0"?>\n<order><ref>B-2</ref><qty>25</qty></order>`;
+
+  beforeEach(() => {
+    store.openWorkspace(
+      [
+        { name: 'good.xml', source: GOOD },
+        { name: 'order.xsd', source: XSD },
+        { name: 'order.sch', source: SCH },
+      ],
+      'xml',
+    );
+    // A second instance joins the corpus rather than evicting the first — the whole point.
+    store.openFile('bad.xml', BAD);
+  });
+
+  it('keeps both documents open', () => {
+    const names = store.openFiles.filter((f) => f.kind === 'xml').map((f) => f.name);
+    expect(names).toEqual(['good.xml', 'bad.xml']);
+  });
+
+  it('counts failures per document, not per kind', () => {
+    const counts = countsByFile(workspaceProblems());
+    const good = store.filesOfKind('xml').find((f) => f.name === 'good.xml')!;
+    const bad = store.filesOfKind('xml').find((f) => f.name === 'bad.xml')!;
+
+    // The rules cap quantity at 10. One document breaks that and the other does not, and the two
+    // numbers side by side are the feature.
+    expect(countsFor(counts, good.id).errors).toBe(0);
+    expect(countsFor(counts, bad.id).errors).toBeGreaterThan(0);
+  });
+
+  it('one edit to the rules moves both documents', () => {
+    const good = store.filesOfKind('xml').find((f) => f.name === 'good.xml')!;
+    const bad = store.filesOfKind('xml').find((f) => f.name === 'bad.xml')!;
+
+    // Tighten the rule so even the good document breaches it. Nothing about either instance
+    // changed; they are now both wrong because of something typed in a third file.
+    store.activateKind('sch');
+    store.run(
+      setAttribute(
+        store.documentFor('sch')!,
+        at('sch', [0, 0, 0]),
+        { prefix: '', localName: 'test', namespaceUri: null },
+        'qty < 1',
+      ),
+    );
+
+    const counts = countsByFile(workspaceProblems());
+    expect(countsFor(counts, good.id).errors).toBeGreaterThan(0);
+    expect(countsFor(counts, bad.id).errors).toBeGreaterThan(0);
+  });
+
+  it('attributes each finding to the document it came from', () => {
+    const bad = store.filesOfKind('xml').find((f) => f.name === 'bad.xml')!;
+    const fromBad = workspaceProblems().filter(
+      (problem) => problem.fileId === bad.id && problem.source === 'rules',
+    );
+    expect(fromBad.map((problem) => problem.message)).toContain(
+      'Orders of ten or more need approval.',
+    );
+  });
+
+  it('closing one document leaves the other and its verdict intact', () => {
+    const bad = store.filesOfKind('xml').find((f) => f.name === 'bad.xml')!;
+    store.closeFile(bad.id);
+
+    expect(store.filesOfKind('xml').map((f) => f.name)).toEqual(['good.xml']);
+    const counts = countsByFile(workspaceProblems());
+    const good = store.filesOfKind('xml')[0]!;
+    expect(countsFor(counts, good.id).errors).toBe(0);
   });
 });

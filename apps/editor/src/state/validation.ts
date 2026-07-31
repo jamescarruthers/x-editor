@@ -67,6 +67,15 @@ export class ValidationClient {
 
   state: VerdictState = IDLE;
 
+  /**
+   * The document the current verdict describes.
+   *
+   * libxml2 runs one document in one worker, so with a corpus open a verdict is about exactly one
+   * file and attributing it to any other would be a confident lie. Until the queue lands (PLAN.md
+   * §6.2), findings are shown only against the document they actually ran against.
+   */
+  documentId: number | null = null;
+
   constructor(private readonly onChange: () => void) {}
 
   /** Point the worker at a schema. Compiling is what makes the first validation fast. */
@@ -85,8 +94,9 @@ export class ValidationClient {
   }
 
   /** Ask for a verdict on the current document, debounced. */
-  request(document: XmlDocument): void {
+  request(document: XmlDocument, documentId: number | null = null): void {
     if (this.sources.length === 0 || this.worker === null) return;
+    this.documentId = documentId;
 
     // Existing findings become stale the instant the document changes, so the UI can dim them
     // rather than continue asserting something about a document that no longer exists.
