@@ -82,9 +82,10 @@ function FileChip({
   closable: boolean;
 }): React.JSX.Element {
   const active = store.activeId === id;
-  // Instance documents are told apart by name; there is only ever one schema and one rule set, so
-  // those read better by kind.
-  const label = kind === 'xml' ? name : FILE_LABELS[kind];
+  // Anything there can be several of is told apart by name; a lone schema or rule set reads better
+  // as its kind, since the name adds nothing when there is nothing to distinguish it from.
+  const several = store.filesOfKind(kind).length > 1;
+  const label = kind === 'xml' || several ? name : FILE_LABELS[kind];
 
   return (
     <span

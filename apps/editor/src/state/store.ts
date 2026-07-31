@@ -274,14 +274,12 @@ class EditorStore {
     // An instance document joins the corpus; a schema or a rule set replaces the one before it.
     // Steps 2 and 3 of PLAN.md §6.2 lift that restriction; step 1 deliberately does not, so the
     // validation-scaling problem is met with one schema rather than several at once.
-    if (kind === 'xml') {
-      const sameName = this.files.findIndex((entry) => entry.kind === 'xml' && entry.name === fileName);
+    {
+      // Every kind accumulates. Several documents, several schemas and several rule sets is the
+      // working arrangement rather than an edge case. Reopening the same name replaces it in place.
+      const sameName = this.files.findIndex((entry) => entry.kind === kind && entry.name === fileName);
       if (sameName === -1) this.files.push(file);
       else this.files[sameName] = file;
-    } else {
-      const existing = this.files.findIndex((entry) => entry.kind === kind);
-      if (existing === -1) this.files.push(file);
-      else this.files[existing] = file;
     }
     if (options.focus !== false) this.activeFileId = file.id;
     expandInitial(file);
@@ -340,8 +338,10 @@ class EditorStore {
    * expensive halves and are guarded or debounced.
    */
   private sync(): void {
-    const xsd = this.files.find((file) => file.kind === 'xsd');
-    const sch = this.files.find((file) => file.kind === 'sch');
+    const schemaFiles = this.files.filter((file) => file.kind === 'xsd');
+    const xsd = schemaFiles[0];
+    const ruleFiles = this.files.filter((file) => file.kind === 'sch');
+    const sch = ruleFiles[0];
     const xmlFiles = this.files.filter((file) => file.kind === 'xml');
     // The active document first when it is an instance: a verdict someone is waiting for should not
     // queue behind nine they are not looking at.
@@ -358,25 +358,27 @@ class EditorStore {
         this.verdict.setSchema([], '');
       }
     } else {
-      const source = xsd.doc.serialize();
+      // Keyed on every schema's text, so editing the second one recompiles the set too.
+      const source = schemaFiles.map((file) => `${file.name}\u0000${file.doc.serialize()}`).join('\u0001');
       if (source !== this.compiledFrom) {
         this.compiledFrom = source;
         // The guidance engine is in-process and lazy, so this is affordable per keystroke — and it
         // is what makes editing a schema show up in the other file immediately.
-        this.schemaProblems = this.schema.attach(xsd.name, source);
+        this.schemaProblems = this.schema.attachAll(
+          schemaFiles.map((file) => ({ name: file.name, source: file.doc.serialize() })),
+        );
         if (this.schema.needsXPath) void loadXPath().then(() => this.emit());
         this.scheduleEngineRecompile(xsd.name);
       }
     }
 
-    this.schematron.setRules(sch?.doc ?? null);
+    this.schematron.setAllRules(ruleFiles);
     this.schematron.setSample(xml?.doc ?? null, xml?.name ?? null);
     this.schematron.run();
     this.schematron.runAll(ordered);
 
-    // One worker, one document: the foreground instance. The rest are covered by the guidance
-    // engine and the rules until the queue in PLAN.md §6.2 lands.
-    if (xml !== undefined) this.verdict.request(xml.doc, xml.id);
+    // Every instance, queued foreground-first against the schema already compiled into the worker.
+    if (ordered.length > 0) this.verdict.requestAll(ordered);
   }
 
   /**
@@ -392,8 +394,8 @@ class EditorStore {
     this.engineTimer = setTimeout(() => {
       this.engineTimer = null;
       this.verdict.setSchema(this.schema.sources(), rootUri);
-      const first = this.files.find((file) => file.kind === 'xml');
-      if (first !== undefined) this.verdict.request(first.doc);
+      const instances = this.files.filter((file) => file.kind === 'xml');
+      if (instances.length > 0) this.verdict.requestAll(instances);
     }, 500);
   }
 

@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { loadXPath } from '@x-editor/xsd';
-import { setAttribute, setTextValue } from '@x-editor/xml-core';
+import { loadXPath, XSD_NS } from '@x-editor/xsd';
+import { insertElement, setAttribute, setTextValue, type NodeId } from '@x-editor/xml-core';
 import { store } from '../src/state/store.js';
 import { workspaceProblems, countsByFile, countsFor } from '../src/model/workspaceProblems.js';
 import { NEW_SCH, NEW_XML, NEW_XSD } from '../src/state/templates.js';
@@ -320,5 +320,161 @@ describe('a corpus of instance documents', () => {
     const counts = countsByFile(workspaceProblems());
     const good = store.filesOfKind('xml')[0]!;
     expect(countsFor(counts, good.id).errors).toBe(0);
+  });
+});
+
+describe('several schemas as one set', () => {
+  // Two schemas that never mention each other. To XSD this is one set with two roots: symbol
+  // spaces are per namespace, not per file.
+  const SHIPPING = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="shipment" type="Shipment"/>
+  <xs:complexType name="Shipment">
+    <xs:sequence><xs:element name="carrier" type="xs:string"/></xs:sequence>
+  </xs:complexType>
+</xs:schema>`;
+
+  const SHIPMENT = `<?xml version="1.0"?>\n<shipment><carrier>DHL</carrier></shipment>`;
+
+  beforeEach(() => {
+    store.openWorkspace(
+      [
+        { name: 'order.xml', source: XML },
+        { name: 'order.xsd', source: XSD },
+      ],
+      'xml',
+    );
+    store.openFile('shipping.xsd', SHIPPING);
+  });
+
+  it('keeps both schemas open rather than the second evicting the first', () => {
+    expect(store.filesOfKind('xsd').map((f) => f.name)).toEqual(['order.xsd', 'shipping.xsd']);
+  });
+
+  it('makes components from every schema visible at once', () => {
+    const model = store.schema.model!;
+    // One model, both roots. A model per schema would have forced "which schema is this document
+    // checked against?" on every file, and there is no honest answer to that.
+    const names = model.globalElements().map((e) => e.name.localName).sort();
+    expect(names).toEqual(['order', 'shipment']);
+  });
+
+  it('validates documents belonging to either schema', () => {
+    store.openFile('shipment.xml', SHIPMENT);
+    const counts = countsByFile(workspaceProblems());
+    const shipment = store.filesOfKind('xml').find((f) => f.name === 'shipment.xml')!;
+    const order = store.filesOfKind('xml').find((f) => f.name === 'order.xml')!;
+    expect(countsFor(counts, shipment.id).errors).toBe(0);
+    expect(countsFor(counts, order.id).errors).toBe(0);
+  });
+
+  it('blames the schema that actually has the fault, not the first one open', () => {
+    // Break the *second* schema. Attributing this to order.xsd would send an author editing a file
+    // they had not touched — which is what a single xsd slot did by construction.
+    store.activate(store.filesOfKind('xsd').find((f) => f.name === 'shipping.xsd')!.id);
+    store.run(
+      setAttribute(
+        store.documentFor('xsd')!,
+        store.document.childrenOf(store.document.documentElement()!).filter(
+          (c) => store.document.node(c)?.kind === 'element',
+        )[0]!,
+        { prefix: '', localName: 'type', namespaceUri: null },
+        'NoSuchType',
+      ),
+    );
+
+    const problems = workspaceProblems().filter((p) => p.file === 'xsd' && p.severity === 'error');
+    const shipping = store.filesOfKind('xsd').find((f) => f.name === 'shipping.xsd')!;
+    const order = store.filesOfKind('xsd').find((f) => f.name === 'order.xsd')!;
+    expect(problems.some((p) => p.fileId === shipping.id)).toBe(true);
+    expect(problems.some((p) => p.fileId === order.id)).toBe(false);
+  });
+
+  it('recompiles the set when the second schema changes, not just the first', () => {
+    const before = store.schema.model!.globalElements().length;
+    store.activate(store.filesOfKind('xsd').find((f) => f.name === 'shipping.xsd')!.id);
+    const root = store.document.documentElement()!;
+    store.run(
+      insertElement(store.document, root, store.document.childrenOf(root).length, {
+        name: { prefix: 'xs', localName: 'element', namespaceUri: XSD_NS },
+        attributes: [
+          { name: { prefix: '', localName: 'name', namespaceUri: null }, value: 'parcel' },
+          { name: { prefix: '', localName: 'type', namespaceUri: null }, value: 'xs:string' },
+        ],
+      }),
+    );
+    expect(store.schema.model!.globalElements().length).toBe(before + 1);
+  });
+});
+
+describe('several rule sets', () => {
+  // A second, independent rule set. Schematron's first-match-wins is per *pattern*, so two files
+  // never shadow one another — running them separately is the correct semantics, not a shortcut.
+  const CURRENCY = `<?xml version="1.0"?>
+<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">
+  <sch:pattern id="c">
+    <sch:rule context="order">
+      <sch:assert test="starts-with(ref, 'A')">Order references must start with A.</sch:assert>
+    </sch:rule>
+  </sch:pattern>
+</sch:schema>`;
+
+  const BAD_REF = `<?xml version="1.0"?>\n<order><ref>B-2</ref><qty>25</qty></order>`;
+
+  beforeEach(() => {
+    workspace();
+    store.openFile('currency.sch', CURRENCY);
+  });
+
+  it('keeps both rule sets open', () => {
+    expect(store.filesOfKind('sch').map((f) => f.name)).toEqual(['order.sch', 'currency.sch']);
+  });
+
+  it('runs every rule set against every document', () => {
+    store.openFile('bad.xml', BAD_REF);
+    const bad = store.filesOfKind('xml').find((f) => f.name === 'bad.xml')!;
+    const messages = workspaceProblems()
+      .filter((p) => p.fileId === bad.id && p.source === 'rules')
+      .map((p) => p.message);
+
+    // One breach from each file. Merging the sets would have invented shadowing ISO does not
+    // describe and could have silenced one of them.
+    expect(messages).toContain('Orders of ten or more need approval.');
+    expect(messages).toContain('Order references must start with A.');
+  });
+
+  it('blames a broken rule on the file that holds it', () => {
+    const currency = store.filesOfKind('sch').find((f) => f.name === 'currency.sch')!;
+    const order = store.filesOfKind('sch').find((f) => f.name === 'order.sch')!;
+    store.activate(currency.id);
+    // Address the *active* document: `at('sch', …)` resolves the first rule set, which is the one
+    // this test must leave alone.
+    const doc = store.document;
+    const el = (id: NodeId) => doc.childrenOf(id).filter((c) => doc.node(c)?.kind === 'element');
+    store.run(
+      setAttribute(
+        doc,
+        el(el(el(doc.documentElement()!)[0]!)[0]!)[0]!,
+        { prefix: '', localName: 'test', namespaceUri: null },
+        'starts-with(((',
+      ),
+    );
+
+    const problems = workspaceProblems().filter((p) => p.file === 'sch');
+    expect(problems.some((p) => p.fileId === currency.id)).toBe(true);
+    expect(problems.some((p) => p.fileId === order.id)).toBe(false);
+  });
+
+  it('stops running a rule set when its file is closed', () => {
+    store.openFile('bad.xml', BAD_REF);
+    const currency = store.filesOfKind('sch').find((f) => f.name === 'currency.sch')!;
+    store.closeFile(currency.id);
+
+    const bad = store.filesOfKind('xml').find((f) => f.name === 'bad.xml')!;
+    const messages = workspaceProblems()
+      .filter((p) => p.fileId === bad.id && p.source === 'rules')
+      .map((p) => p.message);
+    expect(messages).toContain('Orders of ten or more need approval.');
+    expect(messages).not.toContain('Order references must start with A.');
   });
 });

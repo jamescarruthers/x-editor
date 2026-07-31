@@ -54,12 +54,17 @@ export function workspaceProblems(): WorkspaceProblem[] {
 
   // The schema itself: compilation diagnostics, plus dangling references and ambiguous content
   // models. These belong to the XSD even though they are usually noticed in the XML.
-  const xsdFile = store.filesOfKind('xsd')[0];
-  const xsd = xsdFile?.doc ?? null;
-  if (xsd !== null && xsdFile !== undefined) {
+  // The schemas: compilation diagnostics land on whichever document declared the component, which
+  // `origin.documentUri` names — with two schemas open, attributing everything to the first would
+  // send an author editing a file they had not broken. Dangling references and ambiguous content
+  // models are found per document because they are questions about one file's text.
+  const schemaFiles = store.filesOfKind('xsd');
+  const byName = new Map(schemaFiles.map((file) => [file.name, file] as const));
+  if (schemaFiles.length > 0) {
     for (const diagnostic of store.schemaProblems) {
+      const owner = byName.get(diagnostic.origin.documentUri) ?? schemaFiles[0]!;
       out.push({
-        fileId: xsdFile.id,
+        fileId: owner.id,
         file: 'xsd',
         node: diagnostic.origin.node,
         severity: diagnostic.severity === 'error' ? 'error' : 'warning',
@@ -67,22 +72,23 @@ export function workspaceProblems(): WorkspaceProblem[] {
         source: 'schema',
       });
     }
-    for (const problem of selfProblems(xsd, store.schema.model)) {
-      out.push({
-        fileId: xsdFile.id,
-        file: 'xsd',
-        node: problem.node,
-        severity: problem.severity,
-        message: problem.hint === null ? problem.message : `${problem.message} ${problem.hint}`,
-        source: 'schema-health',
-      });
+    for (const file of schemaFiles) {
+      for (const problem of selfProblems(file.doc, store.schema.model)) {
+        out.push({
+          fileId: file.id,
+          file: 'xsd',
+          node: problem.node,
+          severity: problem.severity,
+          message: problem.hint === null ? problem.message : `${problem.message} ${problem.hint}`,
+          source: 'schema-health',
+        });
+      }
     }
   }
 
   // The instance half, per document. This is the corpus: one schema and one rule set, checked
   // against every instance that is open, so a known-good and a known-bad file both react to the
   // same edit. `documentProblems` is in-process and memoised, so N documents is N cheap queries.
-  const verdict = store.verdict.state;
   for (const xmlFile of store.filesOfKind('xml')) {
     if (store.schema.model !== null) {
       for (const diagnostic of documentProblems(store.schema.model, xmlFile.doc)) {
@@ -97,11 +103,11 @@ export function workspaceProblems(): WorkspaceProblem[] {
       }
     }
 
-    // libxml2 still holds one verdict for one document — the queue is the next step. Attributing it
-    // to the wrong file would be worse than withholding it, so it is only shown for the document it
-    // actually ran against.
-    if (!verdict.stale && store.verdict.documentId === xmlFile.id) {
-      for (const finding of verdict.findings) {
+    // libxml2's verdict for this document specifically. One worker validates the corpus in turn, so
+    // a file that has not come round yet simply has no second opinion rather than borrowing one.
+    const engineVerdict = store.verdict.stateFor(xmlFile.id);
+    if (engineVerdict !== null && !engineVerdict.stale) {
+      for (const finding of engineVerdict.findings) {
         out.push({
           fileId: xmlFile.id,
           file: 'xml',
@@ -125,11 +131,9 @@ export function workspaceProblems(): WorkspaceProblem[] {
     }
   }
 
-  const schFile = store.filesOfKind('sch')[0];
-  const sch = schFile?.doc ?? null;
   const result = store.schematron.result;
-  if (sch !== null && schFile !== undefined) {
-    for (const problem of store.schematron.problems) {
+  for (const schFile of store.filesOfKind('sch')) {
+    for (const problem of store.schematron.problemsFor(schFile.id)) {
       out.push({
         fileId: schFile.id,
         file: 'sch',
@@ -139,7 +143,7 @@ export function workspaceProblems(): WorkspaceProblem[] {
         source: 'rules',
       });
     }
-    for (const statistic of result?.statistics ?? []) {
+    for (const statistic of store.schematron.statisticsFor(schFile.id)) {
       if (statistic.shadowedBy !== null) {
         out.push({
           fileId: schFile.id,
@@ -170,7 +174,7 @@ export function workspaceProblems(): WorkspaceProblem[] {
     // A rule that matches nothing is worth saying too, but only once there is something to match
     // against — otherwise every rule reports it the moment the workspace has no XML.
     if (store.has('xml')) {
-      for (const statistic of result?.statistics ?? []) {
+      for (const statistic of store.schematron.statisticsFor(schFile.id)) {
         if (statistic.matched > 0 || statistic.shadowedBy !== null) continue;
         out.push({
           fileId: schFile.id,

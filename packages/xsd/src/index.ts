@@ -80,7 +80,7 @@ export type {
 export { parseSchemaSource, parseSchemaDocument } from './parseSchema.js';
 export type { ParseSchemaResult } from './parseSchema.js';
 
-export { assembleSchema, catalogueFrom, resolveUri, REDEFINE_NS } from './assemble.js';
+export { assembleSchema, assembleSchemas, catalogueFrom, resolveUri, REDEFINE_NS } from './assemble.js';
 export type { AssembledDocument, SchemaCatalogue, SchemaSet } from './assemble.js';
 
 export { SymbolTable, declaredName } from './symbols.js';
