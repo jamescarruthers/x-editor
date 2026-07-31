@@ -51,6 +51,26 @@ export class SchematronStore {
    */
   private byDocument = new Map<number, SchematronResult>();
 
+  /**
+   * One parsed rule set per `.sch` file, keyed by file id.
+   *
+   * Rule sets are independent by construction — Schematron's first-match-wins is *per pattern*, so
+   * two files never shadow each other and running them separately is the correct semantics rather
+   * than a convenience. Merging them into one schema would invent shadowing that ISO does not
+   * describe, and quietly silence rules.
+   */
+  private ruleSets = new Map<number, { schema: SchSchema; source: string; problems: readonly SchDiagnostic[] }>();
+
+  /**
+   * Per rule set, what its rules did against the sample: matched, fired, shadowed, broken.
+   *
+   * Kept per set rather than concatenated, because these are the findings about the *rules* rather
+   * than about a document, and every one of them names a file to go and fix. A broken expression in
+   * the second rule set read from the first set's statistics is simply not reported — which is the
+   * failure a test caught here, and the quietest kind: a rule that checks nothing and says nothing.
+   */
+  private statsBySet = new Map<number, SchematronResult>();
+
   /** The source the rules were last parsed from, so an unrelated edit does not reparse. */
   private rulesSource: string | null = null;
 
@@ -85,17 +105,74 @@ export class SchematronStore {
     this.problems = parsed.problems;
   }
 
-  /** Findings for one instance document. Empty when the rules have not run against it. */
+  /** Findings for one instance document, from every open rule set. */
   findingsFor(id: number): readonly SchematronResult['findings'][number][] {
     return this.byDocument.get(id)?.findings ?? [];
   }
 
-  /** Runs the rules over the whole corpus. Cheap: interpretation is in-process, no worker. */
+  /** Parse problems for one rule set, so a broken rule is blamed on the file that holds it. */
+  problemsFor(ruleSetId: number): readonly SchDiagnostic[] {
+    return this.ruleSets.get(ruleSetId)?.problems ?? [];
+  }
+
+  /** What one rule set's rules did against the sample — shadowing, dead contexts, broken tests. */
+  statisticsFor(ruleSetId: number): readonly SchematronResult['statistics'][number][] {
+    return this.statsBySet.get(ruleSetId)?.statistics ?? [];
+  }
+
+  /**
+   * Re-read every open rule set, dropping any whose file has closed.
+   *
+   * Guarded per file on its serialized source, so editing one rule set does not reparse the others.
+   */
+  setAllRules(files: readonly { id: number; doc: XmlDocument }[]): void {
+    const live = new Set(files.map((file) => file.id));
+    for (const id of [...this.ruleSets.keys()]) if (!live.has(id)) this.ruleSets.delete(id);
+
+    for (const file of files) {
+      if (!isSchematronDocument(file.doc)) {
+        this.ruleSets.delete(file.id);
+        continue;
+      }
+      const source = file.doc.serialize();
+      if (this.ruleSets.get(file.id)?.source === source) continue;
+      const parsed = parseSchematron(file.doc);
+      this.ruleSets.set(file.id, { schema: parsed.schema, source, problems: parsed.problems });
+    }
+
+    // The harness and the Inspector still speak about one rule set: the one being edited, or the
+    // first open. Those views are about authoring a single file and mean nothing averaged.
+    const first = files.find((file) => this.ruleSets.has(file.id));
+    const primary = first === undefined ? null : this.ruleSets.get(first.id)!;
+    this.schema = primary?.schema ?? null;
+    this.problems = primary?.problems ?? [];
+    if (primary === null) this.result = null;
+  }
+
+  /**
+   * Runs every rule set over every instance. Cheap: interpretation is in-process, no worker.
+   *
+   * Findings from all rule sets are concatenated per document, because the document's author cares
+   * that it failed, not which file the rule came from. Which file is *wrong* is a different
+   * question, answered by `problemsFor`.
+   */
   runAll(documents: readonly { id: number; doc: XmlDocument }[]): void {
     this.byDocument.clear();
-    if (this.schema === null) return;
+    this.statsBySet.clear();
+    if (this.ruleSets.size === 0) return;
+
     for (const entry of documents) {
-      this.byDocument.set(entry.id, runSchematron(this.schema, entry.doc));
+      const findings: SchematronResult['findings'][number][] = [];
+      const statistics: SchematronResult['statistics'][number][] = [];
+      for (const [setId, set] of this.ruleSets) {
+        const result = runSchematron(set.schema, entry.doc);
+        findings.push(...result.findings);
+        statistics.push(...result.statistics);
+        // Statistics come from the first document only: "does this context match anything?" is a
+        // question about one sample, and averaging it over a corpus makes it meaningless.
+        if (!this.statsBySet.has(setId)) this.statsBySet.set(setId, result);
+      }
+      this.byDocument.set(entry.id, { findings, statistics, problems: [] });
     }
   }
 

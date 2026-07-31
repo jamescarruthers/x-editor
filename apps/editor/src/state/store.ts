@@ -274,16 +274,12 @@ class EditorStore {
     // An instance document joins the corpus; a schema or a rule set replaces the one before it.
     // Steps 2 and 3 of PLAN.md §6.2 lift that restriction; step 1 deliberately does not, so the
     // validation-scaling problem is met with one schema rather than several at once.
-    if (kind === 'xml' || kind === 'xsd') {
-      // Instances and schemas both accumulate: several documents checked against several schemas is
-      // the working arrangement, not an edge case. Reopening the same name replaces it in place.
+    {
+      // Every kind accumulates. Several documents, several schemas and several rule sets is the
+      // working arrangement rather than an edge case. Reopening the same name replaces it in place.
       const sameName = this.files.findIndex((entry) => entry.kind === kind && entry.name === fileName);
       if (sameName === -1) this.files.push(file);
       else this.files[sameName] = file;
-    } else {
-      const existing = this.files.findIndex((entry) => entry.kind === kind);
-      if (existing === -1) this.files.push(file);
-      else this.files[existing] = file;
     }
     if (options.focus !== false) this.activeFileId = file.id;
     expandInitial(file);
@@ -344,7 +340,8 @@ class EditorStore {
   private sync(): void {
     const schemaFiles = this.files.filter((file) => file.kind === 'xsd');
     const xsd = schemaFiles[0];
-    const sch = this.files.find((file) => file.kind === 'sch');
+    const ruleFiles = this.files.filter((file) => file.kind === 'sch');
+    const sch = ruleFiles[0];
     const xmlFiles = this.files.filter((file) => file.kind === 'xml');
     // The active document first when it is an instance: a verdict someone is waiting for should not
     // queue behind nine they are not looking at.
@@ -375,7 +372,7 @@ class EditorStore {
       }
     }
 
-    this.schematron.setRules(sch?.doc ?? null);
+    this.schematron.setAllRules(ruleFiles);
     this.schematron.setSample(xml?.doc ?? null, xml?.name ?? null);
     this.schematron.run();
     this.schematron.runAll(ordered);

@@ -524,9 +524,15 @@ Deliberately not one change.
    so two unrelated schemas and two that `import` each other are the same arrangement and the editor
    needs no mode for it. Diagnostics are attributed through `origin.documentUri`, so a fault in the
    second schema is not blamed on the first.
-3. **Many SCH.** Every rule set runs against every instance; findings carry which rule set raised
-   them.
+3. **Many SCH.** *Done.* Every rule set runs against every instance and their findings concatenate
+   per document, because the document's author cares that it failed rather than which file the rule
+   came from. Rule sets stay separate rather than merging into one schema: first-match-wins is *per
+   pattern*, so two files never shadow each other, and merging would invent shadowing ISO does not
+   describe and quietly silence rules. Parse problems and per-rule statistics — shadowing, dead
+   contexts, broken expressions — are kept per rule set, since each one names a file to go and fix.
 4. **`document()`, scoped to the workspace.** Separate, because it is a threat-model change.
+
+**Status:** steps 1–3 are done; step 4 is not started. Every kind now accumulates.
 
 *Done when:* two XML documents can be open with one schema and one rule set; each shows a live
 failure count in the file list; editing the schema or the rules moves both counts without either

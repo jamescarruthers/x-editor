@@ -131,11 +131,9 @@ export function workspaceProblems(): WorkspaceProblem[] {
     }
   }
 
-  const schFile = store.filesOfKind('sch')[0];
-  const sch = schFile?.doc ?? null;
   const result = store.schematron.result;
-  if (sch !== null && schFile !== undefined) {
-    for (const problem of store.schematron.problems) {
+  for (const schFile of store.filesOfKind('sch')) {
+    for (const problem of store.schematron.problemsFor(schFile.id)) {
       out.push({
         fileId: schFile.id,
         file: 'sch',
@@ -145,7 +143,7 @@ export function workspaceProblems(): WorkspaceProblem[] {
         source: 'rules',
       });
     }
-    for (const statistic of result?.statistics ?? []) {
+    for (const statistic of store.schematron.statisticsFor(schFile.id)) {
       if (statistic.shadowedBy !== null) {
         out.push({
           fileId: schFile.id,
@@ -176,7 +174,7 @@ export function workspaceProblems(): WorkspaceProblem[] {
     // A rule that matches nothing is worth saying too, but only once there is something to match
     // against — otherwise every rule reports it the moment the workspace has no XML.
     if (store.has('xml')) {
-      for (const statistic of result?.statistics ?? []) {
+      for (const statistic of store.schematron.statisticsFor(schFile.id)) {
         if (statistic.matched > 0 || statistic.shadowedBy !== null) continue;
         out.push({
           fileId: schFile.id,

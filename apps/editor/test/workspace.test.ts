@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadXPath, XSD_NS } from '@x-editor/xsd';
-import { insertElement, setAttribute, setTextValue } from '@x-editor/xml-core';
+import { insertElement, setAttribute, setTextValue, type NodeId } from '@x-editor/xml-core';
 import { store } from '../src/state/store.js';
 import { workspaceProblems, countsByFile, countsFor } from '../src/model/workspaceProblems.js';
 import { NEW_SCH, NEW_XML, NEW_XSD } from '../src/state/templates.js';
@@ -404,5 +404,77 @@ describe('several schemas as one set', () => {
       }),
     );
     expect(store.schema.model!.globalElements().length).toBe(before + 1);
+  });
+});
+
+describe('several rule sets', () => {
+  // A second, independent rule set. Schematron's first-match-wins is per *pattern*, so two files
+  // never shadow one another — running them separately is the correct semantics, not a shortcut.
+  const CURRENCY = `<?xml version="1.0"?>
+<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">
+  <sch:pattern id="c">
+    <sch:rule context="order">
+      <sch:assert test="starts-with(ref, 'A')">Order references must start with A.</sch:assert>
+    </sch:rule>
+  </sch:pattern>
+</sch:schema>`;
+
+  const BAD_REF = `<?xml version="1.0"?>\n<order><ref>B-2</ref><qty>25</qty></order>`;
+
+  beforeEach(() => {
+    workspace();
+    store.openFile('currency.sch', CURRENCY);
+  });
+
+  it('keeps both rule sets open', () => {
+    expect(store.filesOfKind('sch').map((f) => f.name)).toEqual(['order.sch', 'currency.sch']);
+  });
+
+  it('runs every rule set against every document', () => {
+    store.openFile('bad.xml', BAD_REF);
+    const bad = store.filesOfKind('xml').find((f) => f.name === 'bad.xml')!;
+    const messages = workspaceProblems()
+      .filter((p) => p.fileId === bad.id && p.source === 'rules')
+      .map((p) => p.message);
+
+    // One breach from each file. Merging the sets would have invented shadowing ISO does not
+    // describe and could have silenced one of them.
+    expect(messages).toContain('Orders of ten or more need approval.');
+    expect(messages).toContain('Order references must start with A.');
+  });
+
+  it('blames a broken rule on the file that holds it', () => {
+    const currency = store.filesOfKind('sch').find((f) => f.name === 'currency.sch')!;
+    const order = store.filesOfKind('sch').find((f) => f.name === 'order.sch')!;
+    store.activate(currency.id);
+    // Address the *active* document: `at('sch', …)` resolves the first rule set, which is the one
+    // this test must leave alone.
+    const doc = store.document;
+    const el = (id: NodeId) => doc.childrenOf(id).filter((c) => doc.node(c)?.kind === 'element');
+    store.run(
+      setAttribute(
+        doc,
+        el(el(el(doc.documentElement()!)[0]!)[0]!)[0]!,
+        { prefix: '', localName: 'test', namespaceUri: null },
+        'starts-with(((',
+      ),
+    );
+
+    const problems = workspaceProblems().filter((p) => p.file === 'sch');
+    expect(problems.some((p) => p.fileId === currency.id)).toBe(true);
+    expect(problems.some((p) => p.fileId === order.id)).toBe(false);
+  });
+
+  it('stops running a rule set when its file is closed', () => {
+    store.openFile('bad.xml', BAD_REF);
+    const currency = store.filesOfKind('sch').find((f) => f.name === 'currency.sch')!;
+    store.closeFile(currency.id);
+
+    const bad = store.filesOfKind('xml').find((f) => f.name === 'bad.xml')!;
+    const messages = workspaceProblems()
+      .filter((p) => p.fileId === bad.id && p.source === 'rules')
+      .map((p) => p.message);
+    expect(messages).toContain('Orders of ten or more need approval.');
+    expect(messages).not.toContain('Order references must start with A.');
   });
 });
