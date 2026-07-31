@@ -274,8 +274,10 @@ class EditorStore {
     // An instance document joins the corpus; a schema or a rule set replaces the one before it.
     // Steps 2 and 3 of PLAN.md §6.2 lift that restriction; step 1 deliberately does not, so the
     // validation-scaling problem is met with one schema rather than several at once.
-    if (kind === 'xml') {
-      const sameName = this.files.findIndex((entry) => entry.kind === 'xml' && entry.name === fileName);
+    if (kind === 'xml' || kind === 'xsd') {
+      // Instances and schemas both accumulate: several documents checked against several schemas is
+      // the working arrangement, not an edge case. Reopening the same name replaces it in place.
+      const sameName = this.files.findIndex((entry) => entry.kind === kind && entry.name === fileName);
       if (sameName === -1) this.files.push(file);
       else this.files[sameName] = file;
     } else {
@@ -340,7 +342,8 @@ class EditorStore {
    * expensive halves and are guarded or debounced.
    */
   private sync(): void {
-    const xsd = this.files.find((file) => file.kind === 'xsd');
+    const schemaFiles = this.files.filter((file) => file.kind === 'xsd');
+    const xsd = schemaFiles[0];
     const sch = this.files.find((file) => file.kind === 'sch');
     const xmlFiles = this.files.filter((file) => file.kind === 'xml');
     // The active document first when it is an instance: a verdict someone is waiting for should not
@@ -358,12 +361,15 @@ class EditorStore {
         this.verdict.setSchema([], '');
       }
     } else {
-      const source = xsd.doc.serialize();
+      // Keyed on every schema's text, so editing the second one recompiles the set too.
+      const source = schemaFiles.map((file) => `${file.name}\u0000${file.doc.serialize()}`).join('\u0001');
       if (source !== this.compiledFrom) {
         this.compiledFrom = source;
         // The guidance engine is in-process and lazy, so this is affordable per keystroke — and it
         // is what makes editing a schema show up in the other file immediately.
-        this.schemaProblems = this.schema.attach(xsd.name, source);
+        this.schemaProblems = this.schema.attachAll(
+          schemaFiles.map((file) => ({ name: file.name, source: file.doc.serialize() })),
+        );
         if (this.schema.needsXPath) void loadXPath().then(() => this.emit());
         this.scheduleEngineRecompile(xsd.name);
       }

@@ -125,6 +125,26 @@ interface PendingDocument {
 }
 
 export function assembleSchema(rootUri: string, catalogue: SchemaCatalogue): SchemaSet {
+  return assembleSchemas([rootUri], catalogue);
+}
+
+/**
+ * Assemble several schema documents into one set.
+ *
+ * Two schemas that never reference each other are, to XSD, simply a set with two roots: the symbol
+ * spaces are per namespace, not per file, so components from both are visible to an instance and to
+ * each other. That is what makes "or just sit side by side" and "one imports the other" the same
+ * arrangement here rather than two modes — whether a reference exists is a property of what the
+ * author wrote, not something the editor has to be told.
+ *
+ * Duplicate global names across roots are the one thing this cannot paper over, and it does not try:
+ * the existing duplicate-component diagnostics fire exactly as they would for one file declaring a
+ * name twice, which is the honest answer.
+ */
+export function assembleSchemas(
+  rootUris: readonly string[],
+  catalogue: SchemaCatalogue,
+): SchemaSet {
   const documents = new Map<string, AssembledDocument>();
   const diagnostics: SchemaDiagnostic[] = [];
   const redefinedOriginals = new Map<string, RawType | RawGroup | RawAttributeGroup>();
@@ -132,7 +152,12 @@ export function assembleSchema(rootUri: string, catalogue: SchemaCatalogue): Sch
   let declaredVersion: '1.0' | '1.1' = '1.0';
   let syntheticCount = 0;
 
-  const queue: PendingDocument[] = [{ uri: rootUri, chameleonNamespace: null, referrer: null }];
+  const queue: PendingDocument[] = rootUris.map((uri) => ({
+    uri,
+    chameleonNamespace: null,
+    referrer: null,
+  }));
+  const rootUri = rootUris[0] ?? '';
 
   while (queue.length > 0) {
     const pending = queue.shift()!;

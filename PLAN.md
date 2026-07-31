@@ -515,11 +515,15 @@ documents against one compiled model is *N* cheap queries.
 
 Deliberately not one change.
 
-1. **Many XML, one XSD, one SCH.** Delivers the case that motivated this — known-good and known-bad
-   side by side — and forces the validation-scaling problem immediately, which is where it should be
-   met rather than after further generalisation.
-2. **Many XSD.** One assembled set from all of them. Mostly a matter of handing `assembleSchema` a
-   larger catalogue.
+1. **Many XML, one XSD, one SCH.** *Done.* Delivered the case that motivated this — known-good and
+   known-bad side by side — and forced the validation-scaling problem immediately, which is where it
+   should be met rather than after further generalisation. The queue followed: one worker validates
+   the corpus in turn against the already-compiled schema, with the foreground document first.
+2. **Many XSD.** *Done.* `assembleSchemas` seeds the assembler's worklist with several roots instead
+   of one, which is all "side by side" means to XSD — symbol spaces are per namespace, not per file,
+   so two unrelated schemas and two that `import` each other are the same arrangement and the editor
+   needs no mode for it. Diagnostics are attributed through `origin.documentUri`, so a fault in the
+   second schema is not blamed on the first.
 3. **Many SCH.** Every rule set runs against every instance; findings carry which rule set raised
    them.
 4. **`document()`, scoped to the workspace.** Separate, because it is a threat-model change.

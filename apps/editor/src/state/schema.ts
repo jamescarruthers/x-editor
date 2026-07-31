@@ -1,6 +1,6 @@
 import {
   SchemaModel,
-  assembleSchema,
+  assembleSchemas,
   catalogueFrom,
   elementContext,
   type ElementContext,
@@ -23,6 +23,8 @@ export class SchemaStore {
   name: string | null = null;
 
   private catalogue: Record<string, string> = {};
+  /** Every schema the user has open, as roots of one assembled set. */
+  private roots: string[] = [];
 
   /**
    * @param supporting Documents the schema's own `include`/`import` will reach for, added in the
@@ -34,9 +36,38 @@ export class SchemaStore {
     source: string,
     supporting: Readonly<Record<string, string>> = {},
   ): SchemaDiagnostic[] {
-    this.catalogue = { ...this.catalogue, ...supporting, [fileName]: source };
-    this.name = fileName;
-    const set = assembleSchema(fileName, catalogueFrom(this.catalogue));
+    return this.attachAll([{ name: fileName, source }], supporting);
+  }
+
+  /**
+   * Compile every open schema as one set.
+   *
+   * One set with several roots rather than one model per schema, because that is what XSD already
+   * means by it: symbol spaces are per namespace, not per file, so an instance sees components from
+   * all of them and they see each other. Two independent schemas and two that `import` one another
+   * are then the same arrangement, differing only in what the author wrote — which is why the editor
+   * needs no mode for it.
+   *
+   * A model per schema would have forced the opposite question on every document: *which* schema is
+   * this one checked against? There is no honest answer while the point is to see all of them at
+   * once.
+   */
+  attachAll(
+    files: readonly { name: string; source: string }[],
+    supporting: Readonly<Record<string, string>> = {},
+  ): SchemaDiagnostic[] {
+    const added: Record<string, string> = { ...supporting };
+    for (const file of files) added[file.name] = file.source;
+    this.catalogue = { ...this.catalogue, ...added };
+    this.roots = files.map((file) => file.name);
+    this.name = this.roots[0] ?? null;
+
+    if (this.roots.length === 0) {
+      this.model = null;
+      return [];
+    }
+
+    const set = assembleSchemas(this.roots, catalogueFrom(this.catalogue));
     this.model = new SchemaModel(set);
     this.needsXPath = set.declaredVersion === '1.1';
     return this.model.allDiagnostics();
@@ -53,7 +84,9 @@ export class SchemaStore {
   /** Adds a supporting document — one an `include` or `import` referenced — without re-rooting. */
   addSupporting(fileName: string, source: string): void {
     this.catalogue = { ...this.catalogue, [fileName]: source };
-    if (this.name !== null) this.attach(this.name, this.catalogue[this.name]!);
+    if (this.roots.length > 0) {
+      this.attachAll(this.roots.map((uri) => ({ name: uri, source: this.catalogue[uri]! })));
+    }
   }
 
   /** The catalogue, for the worker. Buffers only — the worker resolves nothing itself. */
@@ -64,6 +97,7 @@ export class SchemaStore {
   detach(): void {
     this.model = null;
     this.name = null;
+    this.roots = [];
     this.catalogue = {};
   }
 

@@ -54,12 +54,17 @@ export function workspaceProblems(): WorkspaceProblem[] {
 
   // The schema itself: compilation diagnostics, plus dangling references and ambiguous content
   // models. These belong to the XSD even though they are usually noticed in the XML.
-  const xsdFile = store.filesOfKind('xsd')[0];
-  const xsd = xsdFile?.doc ?? null;
-  if (xsd !== null && xsdFile !== undefined) {
+  // The schemas: compilation diagnostics land on whichever document declared the component, which
+  // `origin.documentUri` names — with two schemas open, attributing everything to the first would
+  // send an author editing a file they had not broken. Dangling references and ambiguous content
+  // models are found per document because they are questions about one file's text.
+  const schemaFiles = store.filesOfKind('xsd');
+  const byName = new Map(schemaFiles.map((file) => [file.name, file] as const));
+  if (schemaFiles.length > 0) {
     for (const diagnostic of store.schemaProblems) {
+      const owner = byName.get(diagnostic.origin.documentUri) ?? schemaFiles[0]!;
       out.push({
-        fileId: xsdFile.id,
+        fileId: owner.id,
         file: 'xsd',
         node: diagnostic.origin.node,
         severity: diagnostic.severity === 'error' ? 'error' : 'warning',
@@ -67,15 +72,17 @@ export function workspaceProblems(): WorkspaceProblem[] {
         source: 'schema',
       });
     }
-    for (const problem of selfProblems(xsd, store.schema.model)) {
-      out.push({
-        fileId: xsdFile.id,
-        file: 'xsd',
-        node: problem.node,
-        severity: problem.severity,
-        message: problem.hint === null ? problem.message : `${problem.message} ${problem.hint}`,
-        source: 'schema-health',
-      });
+    for (const file of schemaFiles) {
+      for (const problem of selfProblems(file.doc, store.schema.model)) {
+        out.push({
+          fileId: file.id,
+          file: 'xsd',
+          node: problem.node,
+          severity: problem.severity,
+          message: problem.hint === null ? problem.message : `${problem.message} ${problem.hint}`,
+          source: 'schema-health',
+        });
+      }
     }
   }
 

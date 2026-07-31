@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { loadXPath } from '@x-editor/xsd';
-import { setAttribute, setTextValue } from '@x-editor/xml-core';
+import { loadXPath, XSD_NS } from '@x-editor/xsd';
+import { insertElement, setAttribute, setTextValue } from '@x-editor/xml-core';
 import { store } from '../src/state/store.js';
 import { workspaceProblems, countsByFile, countsFor } from '../src/model/workspaceProblems.js';
 import { NEW_SCH, NEW_XML, NEW_XSD } from '../src/state/templates.js';
@@ -320,5 +320,89 @@ describe('a corpus of instance documents', () => {
     const counts = countsByFile(workspaceProblems());
     const good = store.filesOfKind('xml')[0]!;
     expect(countsFor(counts, good.id).errors).toBe(0);
+  });
+});
+
+describe('several schemas as one set', () => {
+  // Two schemas that never mention each other. To XSD this is one set with two roots: symbol
+  // spaces are per namespace, not per file.
+  const SHIPPING = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="shipment" type="Shipment"/>
+  <xs:complexType name="Shipment">
+    <xs:sequence><xs:element name="carrier" type="xs:string"/></xs:sequence>
+  </xs:complexType>
+</xs:schema>`;
+
+  const SHIPMENT = `<?xml version="1.0"?>\n<shipment><carrier>DHL</carrier></shipment>`;
+
+  beforeEach(() => {
+    store.openWorkspace(
+      [
+        { name: 'order.xml', source: XML },
+        { name: 'order.xsd', source: XSD },
+      ],
+      'xml',
+    );
+    store.openFile('shipping.xsd', SHIPPING);
+  });
+
+  it('keeps both schemas open rather than the second evicting the first', () => {
+    expect(store.filesOfKind('xsd').map((f) => f.name)).toEqual(['order.xsd', 'shipping.xsd']);
+  });
+
+  it('makes components from every schema visible at once', () => {
+    const model = store.schema.model!;
+    // One model, both roots. A model per schema would have forced "which schema is this document
+    // checked against?" on every file, and there is no honest answer to that.
+    const names = model.globalElements().map((e) => e.name.localName).sort();
+    expect(names).toEqual(['order', 'shipment']);
+  });
+
+  it('validates documents belonging to either schema', () => {
+    store.openFile('shipment.xml', SHIPMENT);
+    const counts = countsByFile(workspaceProblems());
+    const shipment = store.filesOfKind('xml').find((f) => f.name === 'shipment.xml')!;
+    const order = store.filesOfKind('xml').find((f) => f.name === 'order.xml')!;
+    expect(countsFor(counts, shipment.id).errors).toBe(0);
+    expect(countsFor(counts, order.id).errors).toBe(0);
+  });
+
+  it('blames the schema that actually has the fault, not the first one open', () => {
+    // Break the *second* schema. Attributing this to order.xsd would send an author editing a file
+    // they had not touched — which is what a single xsd slot did by construction.
+    store.activate(store.filesOfKind('xsd').find((f) => f.name === 'shipping.xsd')!.id);
+    store.run(
+      setAttribute(
+        store.documentFor('xsd')!,
+        store.document.childrenOf(store.document.documentElement()!).filter(
+          (c) => store.document.node(c)?.kind === 'element',
+        )[0]!,
+        { prefix: '', localName: 'type', namespaceUri: null },
+        'NoSuchType',
+      ),
+    );
+
+    const problems = workspaceProblems().filter((p) => p.file === 'xsd' && p.severity === 'error');
+    const shipping = store.filesOfKind('xsd').find((f) => f.name === 'shipping.xsd')!;
+    const order = store.filesOfKind('xsd').find((f) => f.name === 'order.xsd')!;
+    expect(problems.some((p) => p.fileId === shipping.id)).toBe(true);
+    expect(problems.some((p) => p.fileId === order.id)).toBe(false);
+  });
+
+  it('recompiles the set when the second schema changes, not just the first', () => {
+    const before = store.schema.model!.globalElements().length;
+    store.activate(store.filesOfKind('xsd').find((f) => f.name === 'shipping.xsd')!.id);
+    const root = store.document.documentElement()!;
+    store.run(
+      insertElement(store.document, root, store.document.childrenOf(root).length, {
+        name: { prefix: 'xs', localName: 'element', namespaceUri: XSD_NS },
+        attributes: [
+          { name: { prefix: '', localName: 'name', namespaceUri: null }, value: 'parcel' },
+          { name: { prefix: '', localName: 'type', namespaceUri: null }, value: 'xs:string' },
+        ],
+      }),
+    );
+    expect(store.schema.model!.globalElements().length).toBe(before + 1);
   });
 });
