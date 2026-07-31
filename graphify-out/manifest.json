@@ -673,5 +673,30 @@
     "mtime": 1785314672.1493964,
     "ast_hash": "ba270b94d6ab1cea1cba6c73f6ed1bf7",
     "semantic_hash": "ba270b94d6ab1cea1cba6c73f6ed1bf7"
+  },
+  ".claude/graphify-guard.sh": {
+    "mtime": 1785492794.9789453,
+    "ast_hash": "39e0c0a29a00125e4c54ec59328956fb",
+    "semantic_hash": ""
+  },
+  ".claude/graphify-setup.sh": {
+    "mtime": 1785492775.7949457,
+    "ast_hash": "2f6694eec0cbe0d8cdef21ad4c816252",
+    "semantic_hash": ""
+  },
+  ".claude/settings.json": {
+    "mtime": 1785492821.1469445,
+    "ast_hash": "a5bed898d2713f650202d4f9f16abfda",
+    "semantic_hash": ""
+  },
+  ".claude/settings.local.json": {
+    "mtime": 1785492868.1069436,
+    "ast_hash": "55e4b9ad9c0434227d1b955fce8bf4d2",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1785492850.946944,
+    "ast_hash": "46026492396070a673e256651fc90be9",
+    "semantic_hash": ""
   }
 }
