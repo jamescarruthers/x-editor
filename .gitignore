@@ -4,3 +4,14 @@ coverage/
 *.tsbuildinfo
 .DS_Store
 graphify-out/
+
+# graphify's per-machine setup. Both name paths that exist only on the machine
+# `graphify hook install` was run on, so committing them breaks a fresh clone
+# rather than helping it: settings.json hardcodes the absolute path of the
+# graphify binary, and .gitattributes declares a `merge=graphify` driver that
+# only a machine with the hooks installed has registered. That driver is inert
+# here in any case — it names graphify-out/graph.json, which is ignored above
+# and therefore never merged. Anyone who wants these runs `graphify claude
+# install` and `graphify hook install` themselves.
+.claude/settings.json
+.gitattributes
