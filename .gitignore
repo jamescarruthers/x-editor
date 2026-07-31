@@ -3,15 +3,15 @@ dist/
 coverage/
 *.tsbuildinfo
 .DS_Store
-graphify-out/
-
-# graphify's per-machine setup. Both name paths that exist only on the machine
-# `graphify hook install` was run on, so committing them breaks a fresh clone
-# rather than helping it: settings.json hardcodes the absolute path of the
-# graphify binary, and .gitattributes declares a `merge=graphify` driver that
-# only a machine with the hooks installed has registered. That driver is inert
-# here in any case — it names graphify-out/graph.json, which is ignored above
-# and therefore never merged. Anyone who wants these runs `graphify claude
-# install` and `graphify hook install` themselves.
-.claude/settings.json
-.gitattributes
+# graphify's knowledge graph is committed, so a fresh container has a map without
+# rebuilding one. Only the parts that cannot travel are excluded.
+#
+# Absolute paths belonging to whichever machine last ran the tool.
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+# A 1.8MB rendering of graph.json, regenerated in about a second by
+# `graphify export html`. Committing it would roughly quadruple what each
+# commit adds, for something derivable from a file already in the tree.
+graphify-out/graph.html
+# A per-machine token tally, not a fact about the project.
+graphify-out/cost.json
