@@ -15,9 +15,10 @@ independent implementation: `libxml2-wasm` for XSD 1.0, `xmlschema` for 1.1, and
 reference for Schematron. All five spikes are answered — see [`docs/spikes.md`](docs/spikes.md).
 **Phase 8 is ongoing**; its two risk-carrying items (mixed content, the table view) are done, and
 what remains there is listed honestly in §10. **Phase 9 — the workspace becoming a corpus of many
-documents rather than one file per kind — is planned but not started; see §6.2**, which also records
-why the one-slot design in §6.1 is the wrong shape for what the tool is for. See §10 for the roadmap
-and the per-phase *done when*.
+documents rather than one file per kind — is done, all four steps; see §6.2**, which also records
+why the one-slot design in §6.1 was the wrong shape for what the tool is for, and how `doc()` was
+scoped to the open workspace without widening the threat model. See §10 for the roadmap and the
+per-phase *done when*.
 
 **Companion documents**
 
@@ -458,17 +459,16 @@ anonymous complex types where a named one would do". The interpreter neither kno
 target is a schema. Nothing needs building; the one-slot design is the only thing preventing it, and
 Phase 9 removes that by construction.
 
-**Rules across documents: does not work, deliberately.** Comparing a value in `invoice.xml` against a
-code list in `codes.xml` requires XPath's `document()`, and `xpath.ts` supplies no document resolver
-precisely so that it is unavailable. That is a security decision, recorded in §8: a `.sch` someone
-emailed you is executable code, and a resolver is the difference between rules that inspect the
-document and rules that read the disk.
+**Rules across documents: works, scoped to the workspace.** Comparing a value in `invoice.xml`
+against a code list in `codes.xml` requires XPath's `doc()`, which is a security decision recorded
+in §8: a `.sch` someone emailed you is executable code, and a resolver is the difference between
+rules that inspect the document and rules that read the disk.
 
-It can be enabled without giving that up, by scoping the resolver to **files already open in the
-workspace**. A rule may then reach `codes.xml` if the user opened `codes.xml`, and nothing else —
-same shape as the schema catalogue, which resolves `include` against opened documents rather than
-fetching. This is the one genuinely new capability in Phase 9 and should not be bundled with the rest:
-it is a change to the threat model and deserves its own decision.
+It was enabled without giving that up, by scoping the resolver to **files already open in the
+workspace**. A rule reaches `codes.xml` if the user opened `codes.xml`, and nothing else — same
+shape as the schema catalogue, which resolves `include` against opened documents rather than
+fetching. This was the one genuinely new capability in Phase 9 and was not bundled with the rest:
+it is a change to the threat model and got its own decision, staged as step 4 below.
 
 **Schematron validating "between two XSDs": not a thing.** Schematron runs on an instance and never
 sees the compiled schema. The useful reading of that request is the first claim above.
@@ -530,38 +530,46 @@ Deliberately not one change.
    pattern*, so two files never shadow each other, and merging would invent shadowing ISO does not
    describe and quietly silence rules. Parse problems and per-rule statistics — shadowing, dead
    contexts, broken expressions — are kept per rule set, since each one names a file to go and fix.
-4. **`document()`, scoped to the workspace.** Separate, because it is a threat-model change. Agreed
-   in principle: a rule may reach a file the user has already opened, and nothing else. Two findings
-   from the spike, both of which change how it should be built:
+4. **`document()`, scoped to the workspace.** *Done.* Separate, because it is a threat-model
+   change: a rule may reach a file the user has already opened, and nothing else. Built as the two
+   spike findings said it should be:
 
-   **`fn:doc` can be registered into the standard namespace.** `registerCustomXPathFunction` accepts
+   **`fn:doc` is registered into the standard namespace.** `registerCustomXPathFunction` accepts
    `{namespaceURI: 'http://www.w3.org/2005/xpath-functions', localName: 'doc'}` and the expression
-   `doc("codes.xml")` then resolves through it — verified against fontoxpath 3.34.0. So the
-   capability does not need an editor-specific `x:doc()` that would make every rule using it
-   unportable; authors write standard `doc()` / `document()` and the same `.sch` runs in another
-   processor. The resolver is ours, so scoping is total: it looks up the open workspace and there is
-   no code path to disk or network.
+   `doc("codes.xml")` resolves through it — `document()` likewise, for rules written against the
+   XSLT binding. So the capability did not need an editor-specific `x:doc()` that would make every
+   rule using it unportable; authors write standard `doc()` and the same `.sch` runs in another
+   processor. The resolver is ours, so scoping is total: it looks up the open workspace — a map the
+   caller passes per evaluation — and there is no code path to disk or network. Callers that pass
+   no map (XSD 1.1 assertions, the syntax checker) keep a `doc()` that only throws.
 
-   Note that §8's phrasing — "fontoxpath has no `fn:doc()` unless a resolver is supplied" — is
-   imprecise. There is no resolver option; fontoxpath simply does not implement `fn:doc`, and
-   registering one is what supplies it.
+   The spike also corrected §8's phrasing, since rewritten there: "fontoxpath has no `fn:doc()`
+   unless a resolver is supplied" read as though an option existed and was withheld. There is no
+   such option; fontoxpath simply does not implement `fn:doc`, and registering one is what
+   supplies it.
 
-   **The real work is the facade, not the resolver.** `CstDomFacade` wraps one `XmlDocument` and
-   every `XPathNode` carries `__id: NodeId`. Node ids are per document, so a node from `codes.xml`
-   is indistinguishable from a node with the same id in the instance. Cross-document evaluation
-   needs each node adapter tagged with its document and all eleven facade methods dispatching on
-   that tag, plus a document-aware `XPathNodeRef` and its five callers.
+   **The real work was the facade, not the resolver.** Node ids are per document, so a node from
+   `codes.xml` is indistinguishable from a node with the same id in the instance. Every `XPathNode`
+   adapter is therefore tagged with its document and every facade method dispatches on that tag;
+   adapter caches are keyed per document so XPath node identity holds across all of them at once;
+   and the isolate check compares the document too, so an isolated instance node does not isolate
+   its same-id twin in another file. `XPathNodeRef` carries a `documentName` for foreign nodes, and
+   its consumers refuse to resolve such a ref against the instance rather than misbinding silently.
 
-   Findings stay bound to the instance, which keeps the change smaller than it first looks: a rule
-   uses `doc()` inside a `test=` to *look up* a value, while the assertion still fires on a node in
-   the document being validated. The other document needs to be traversable and readable, not
-   addressable by the UI.
+   Findings stay bound to the instance, which kept the change as small as predicted: a rule uses
+   `doc()` inside a `test=` to *look up* a value, while the assertion still fires on a node in the
+   document being validated. A rule context that selects nodes *of* another document is dropped —
+   those matches have no instance node to attribute a finding to. The other document is traversable
+   and readable, not addressable by the UI.
 
-   *Done when:* a rule in one file can compare a value in an instance against a value in another
-   open document; a `doc()` naming a file that is not open fails loudly rather than returning an
-   empty sequence; and nothing reachable from a rule can read a file the user has not opened.
+   All three *done when* clauses hold, each pinned by a test: a rule in one file compares a value
+   in an instance against a value in another open document, live across the workspace; a `doc()`
+   naming a file that is not open is a loud per-rule-set problem rather than an empty sequence
+   (empty would make `not(doc(...)/...)` quietly true, the worst reading of a typo); and nothing
+   reachable from a rule can read a file the user has not opened — the resolver consults the
+   workspace map and nothing else.
 
-**Status:** steps 1–3 are done; step 4 is not started. Every kind now accumulates.
+**Status:** all four steps are done. Every kind accumulates, and rules see the whole workspace.
 
 *Done when:* two XML documents can be open with one schema and one rule set; each shows a live
 failure count in the file list; editing the schema or the rules moves both counts without either
@@ -636,10 +644,13 @@ Client-side is not a security property. Three exposures, each with a named mitig
 **A malicious `.sch` is arbitrary code execution against a confidential document.** Classical
 Schematron compiles to XSLT, which is Turing-complete and has `fn:doc()`/`unparsed-text()`. A rule
 could exfiltrate the entire document from inside the user's browser, with the user's network position.
-Our fontoxpath interpreter is **safe by construction** — fontoxpath has no `fn:doc()` unless you supply
-a resolver, and no filesystem or network access. This is a second, independent reason for the §5.2
-decision. Embedded Schematron inside `xs:appinfo` (a common real-world pattern the user never
-consciously ran) is covered by the same interpreter.
+Our fontoxpath interpreter is **safe by construction** — fontoxpath does not implement `fn:doc()`
+(registering one is what supplies it, which is what §6.2 step 4 did) and has no filesystem or network
+access. The registered `doc()` resolves only against a per-evaluation map of documents already open
+in the workspace; a name that is not an open file is an error, never a fetch, and callers that pass
+no map — XSD 1.1 assertions among them — get a `doc()` that only throws. This is a second,
+independent reason for the §5.2 decision. Embedded Schematron inside `xs:appinfo` (a common
+real-world pattern the user never consciously ran) is covered by the same interpreter.
 
 **libxml2 entity and network exposure.** Named flag policy, asserted by unit test:
 `XML_PARSE_NONET`, and **never** `NOENT`, `DTDLOAD`, `DTDATTR`, `XINCLUDE` or `HUGE`. A test that feeds

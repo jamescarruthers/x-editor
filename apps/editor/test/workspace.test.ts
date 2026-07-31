@@ -478,3 +478,64 @@ describe('several rule sets', () => {
     expect(messages).not.toContain('Order references must start with A.');
   });
 });
+
+describe('doc() across the workspace', () => {
+  const CODES = `<?xml version="1.0"?>
+<codes><code>GB</code><code>FR</code></codes>`;
+
+  const COUNTRY_SCH = `<?xml version="1.0"?>
+<sch:schema xmlns:sch="http://purl.oclc.org/dsdl/schematron" queryBinding="xslt2">
+  <sch:pattern id="countries">
+    <sch:rule context="order">
+      <sch:assert test="@country = doc('codes.xml')/codes/code">The country is not in the code list.</sch:assert>
+    </sch:rule>
+  </sch:pattern>
+</sch:schema>`;
+
+  it('a rule compares an instance value against another open file, live', () => {
+    store.openWorkspace(
+      [
+        { name: 'order.xml', source: '<?xml version="1.0"?>\n<order country="DE"/>' },
+        { name: 'codes.xml', source: CODES },
+        { name: 'codes.sch', source: COUNTRY_SCH },
+      ],
+      'xml',
+    );
+
+    const order = store.filesOfKind('xml').find((f) => f.name === 'order.xml')!;
+    const codes = store.filesOfKind('xml').find((f) => f.name === 'codes.xml')!;
+
+    // The finding lands on order.xml; codes.xml is also an instance but matches no rule context.
+    expect(store.schematron.findingsFor(order.id).map((f) => f.message)).toEqual([
+      'The country is not in the code list.',
+    ]);
+    expect(store.schematron.findingsFor(codes.id)).toEqual([]);
+
+    // Changing the code list clears the verdict without order.xml being touched or reopened — the
+    // workspace, not the file, is what the rules see.
+    store.activate(codes.id);
+    const doc = store.document;
+    const list = doc.documentElement()!;
+    const second = doc.childrenOf(list).filter((c) => doc.node(c)?.kind === 'element')[1]!;
+    store.run(setTextValue(doc, doc.childrenOf(second)[0]!, 'DE'));
+    expect(store.schematron.findingsFor(order.id)).toEqual([]);
+  });
+
+  it('a doc() naming an unopened file is a problem for the rule set, not silence', () => {
+    store.openWorkspace(
+      [
+        { name: 'order.xml', source: '<?xml version="1.0"?>\n<order country="GB"/>' },
+        { name: 'rules.sch', source: COUNTRY_SCH },
+      ],
+      'xml',
+    );
+
+    const rules = store.filesOfKind('sch').find((f) => f.name === 'rules.sch')!;
+    const broken = store.schematron
+      .statisticsFor(rules.id)
+      .flatMap((rule) => rule.assertions)
+      .map((assertion) => assertion.broken)
+      .filter((message) => message !== null);
+    expect(broken.some((message) => message!.includes('does not name an open file'))).toBe(true);
+  });
+});

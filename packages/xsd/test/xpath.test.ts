@@ -158,10 +158,101 @@ describe('node identity', () => {
 });
 
 describe('what the engine cannot reach', () => {
-  it('has no fn:doc, so a hostile expression cannot read anything else', () => {
-    // The safety property the plan relies on for both xs:assert and Schematron: no resolver is
-    // supplied, so there is no filesystem or network access to be had.
+  it('fails doc() loudly when no documents were supplied, so a hostile expression reads nothing', () => {
+    // The safety property the plan relies on for xs:assert: no documents map is passed, so doc()
+    // throws rather than resolving — there is no filesystem or network access to be had.
     const outcome = evaluateBoolean(document, ROOT_ID, 'boolean(doc("file:///etc/passwd"))', {});
     expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.error.message).toContain('not available');
+  });
+});
+
+describe('doc(), scoped to the workspace', () => {
+  const codes = XmlDocument.parse('<codes><code>GB</code><code>FR</code></codes>');
+  const documents = new Map([
+    ['codes.xml', codes],
+    ['self.xml', document],
+  ]);
+
+  it('reads a value from another open document', () => {
+    const outcome = evaluateString(document, root, 'string(doc("codes.xml")/codes/code[1])', {
+      namespaces: NS,
+      documents,
+    });
+    expect(outcome).toEqual({ ok: true, value: 'GB' });
+  });
+
+  it('resolves document() the same way, for rules written against the XSLT binding', () => {
+    const outcome = evaluateString(document, root, 'string(document("codes.xml")/codes/code[2])', {
+      namespaces: NS,
+      documents,
+    });
+    expect(outcome).toEqual({ ok: true, value: 'FR' });
+  });
+
+  it('compares a value in the instance against the other document', () => {
+    const outcome = evaluateBoolean(
+      document,
+      root,
+      'doc("codes.xml")/codes/code[. = "GB"] and not(doc("codes.xml")/codes/code[. = "DE"])',
+      { namespaces: NS, documents },
+    );
+    expect(outcome).toEqual({ ok: true, value: true });
+  });
+
+  it('fails loudly on a file that is not open, not with an empty sequence', () => {
+    // Empty would make not(doc(...)/...) quietly true — the worst reading of a typo.
+    const outcome = evaluateBoolean(document, root, 'boolean(doc("closed.xml"))', {
+      namespaces: NS,
+      documents,
+    });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.error.message).toContain('does not name an open file');
+  });
+
+  it('names the document a foreign node came from, so refs cannot misbind onto the instance', () => {
+    const outcome = evaluateNodes(document, root, 'doc("codes.xml")/codes/code', {
+      namespaces: NS,
+      documents,
+    });
+    if (!outcome.ok) throw new Error(outcome.error.message);
+    expect(outcome.value).toHaveLength(2);
+    for (const ref of outcome.value) expect(ref.documentName).toBe('codes.xml');
+  });
+
+  it('leaves refs into the instance unnamed, even when doc() reaches it by name', () => {
+    const outcome = evaluateNodes(document, root, 'doc("self.xml")//t:line', {
+      namespaces: NS,
+      documents,
+    });
+    if (!outcome.ok) throw new Error(outcome.error.message);
+    expect(outcome.value).toHaveLength(2);
+    for (const ref of outcome.value) expect(ref.documentName).toBeUndefined();
+  });
+
+  it('keeps node identity within the foreign document', () => {
+    const outcome = evaluateString(
+      document,
+      root,
+      'string(count(doc("codes.xml")/codes/code | doc("codes.xml")/codes/code))',
+      { namespaces: NS, documents },
+    );
+    expect(outcome).toEqual({ ok: true, value: '2' });
+  });
+
+  it('does not let an isolated node of the instance isolate its twin in the other document', () => {
+    // The isolate is a node of the facade's own document; the node with the same id in codes.xml
+    // is a different node and must still see its parent.
+    const firstCode = evaluateNodes(document, root, 'doc("codes.xml")/codes/code[1]', {
+      namespaces: NS,
+      documents,
+    });
+    if (!firstCode.ok) throw new Error(firstCode.error.message);
+    const outcome = evaluateBoolean(document, root, 'boolean(doc("codes.xml")/codes/code[1]/..)', {
+      namespaces: NS,
+      documents,
+      isolate: firstCode.value[0]!.node,
+    });
+    expect(outcome).toEqual({ ok: true, value: true });
   });
 });

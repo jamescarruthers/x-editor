@@ -17,9 +17,12 @@
  *    fail lists — which is impossible through a compiled SVRL pipeline, and is the single best
  *    beginner feature in the Schematron editor.
  *
- * Safety comes free: fontoxpath has no `fn:doc()` unless a resolver is supplied, and no filesystem
- * or network access. A malicious `.sch` is therefore *not* arbitrary code execution against a
- * confidential document, which is what it is under the XSLT route.
+ * Safety comes almost free: fontoxpath does not implement `fn:doc()` and has no filesystem or
+ * network access. The `doc()` our XPath layer registers resolves only against documents the caller
+ * passes in — the open workspace, nothing else — so a malicious `.sch` is still *not* arbitrary
+ * code execution against a confidential document, which is what it is under the XSLT route: a rule
+ * can read exactly the files the user already opened, and nothing reachable from a rule touches
+ * the disk or the network.
  */
 
 import { ROOT_ID, isElement, qnameToString, type NodeId, type XmlDocument } from '@x-editor/xml-core';
@@ -101,6 +104,12 @@ export interface SchematronResult {
 export interface RunOptions {
   /** Restrict to the patterns a phase activates. Defaults to the schema's `defaultPhase`. */
   readonly phase?: string;
+  /**
+   * What `doc()` / `document()` in a rule may reach, by file name — the open workspace. A rule uses
+   * it inside a `test=` to look a value up in another open document; the assertion still fires on a
+   * node of the document being validated. Left unset, `doc()` fails loudly.
+   */
+  readonly documents?: ReadonlyMap<string, XmlDocument>;
 }
 
 const EMPTY: SchematronResult = { findings: [], statistics: [], problems: [] };
@@ -136,7 +145,9 @@ export function runSchematron(
 
   for (const pattern of active) {
     const rules = pattern.rules.filter((rule) => !rule.abstract);
-    const matches = rules.map((rule) => selectContext(document, rule, namespaces, problems));
+    const matches = rules.map((rule) =>
+      selectContext(document, rule, namespaces, problems, options.documents),
+    );
 
     // First-match-wins is per pattern, not per schema: a node claimed by a rule in one pattern is
     // still available to rules in the next. Getting this wrong makes half a schema silently inert.
@@ -168,13 +179,20 @@ export function runSchematron(
     for (const claim of claims) {
       const rule = rules[claim.ruleIndex]!;
       const target = claim.target;
-      const variables = bindLets(document, target.node, [...inheritedLets, ...rule.lets], namespaces);
+      const variables = bindLets(
+        document,
+        target.node,
+        [...inheritedLets, ...rule.lets],
+        namespaces,
+        options.documents,
+      );
 
       for (const assertion of rule.assertions) {
         const counts = stats[claim.ruleIndex]!.get(assertion)!;
         const outcome = evaluateBoolean(document, target.node, assertion.test, {
           namespaces,
           variables,
+          documents: options.documents,
         });
 
         if (!outcome.ok) {
@@ -201,11 +219,20 @@ export function runSchematron(
           role: assertion.role,
           flag: assertion.flag,
           test: assertion.test,
-          message: renderMessage(document, target.node, assertion.message, namespaces, variables),
+          message: renderMessage(
+            document,
+            target.node,
+            assertion.message,
+            namespaces,
+            variables,
+            options.documents,
+          ),
           diagnostics: assertion.diagnostics
             .map((id) => schema.diagnostics.get(id))
             .filter((entry) => entry !== undefined)
-            .map((entry) => renderMessage(document, target.node, entry.message, namespaces, variables)),
+            .map((entry) =>
+              renderMessage(document, target.node, entry.message, namespaces, variables, options.documents),
+            ),
           origin: assertion.origin.node,
         });
       }
@@ -270,6 +297,7 @@ function selectContext(
   rule: SchRule,
   namespaces: Readonly<Record<string, string>>,
   problems: SchDiagnostic[],
+  documents: ReadonlyMap<string, XmlDocument> | undefined,
 ): { node: NodeId; attribute?: number }[] {
   if (rule.context.trim() === '') return [];
 
@@ -277,7 +305,7 @@ function selectContext(
     ? rule.context
     : `descendant-or-self::node()/(${rule.context})`;
 
-  const outcome = evaluateNodes(document, ROOT_ID, expression, { namespaces });
+  const outcome = evaluateNodes(document, ROOT_ID, expression, { namespaces, documents });
   if (!outcome.ok) {
     problems.push({
       severity: 'error',
@@ -287,7 +315,10 @@ function selectContext(
     });
     return [];
   }
-  return outcome.value;
+  // Findings stay bound to the instance. A context that reaches into another open document through
+  // doc() selects nodes this run cannot attribute — a finding on codes.xml pinned to whatever node
+  // shares that id in the instance would be the silent misbinding this feature was staged to avoid.
+  return outcome.value.filter((ref) => ref.documentName === undefined);
 }
 
 interface NodeRef {
@@ -337,11 +368,16 @@ function bindLets(
   context: NodeId,
   lets: readonly SchLet[],
   namespaces: Readonly<Record<string, string>>,
+  documents: ReadonlyMap<string, XmlDocument> | undefined,
 ): Record<string, unknown> {
   const variables: Record<string, unknown> = {};
   for (const binding of lets) {
     if (binding.name === '' || binding.value === null) continue;
-    const outcome = evaluateString(document, context, binding.value, { namespaces, variables });
+    const outcome = evaluateString(document, context, binding.value, {
+      namespaces,
+      variables,
+      documents,
+    });
     // A broken `let` is the author's problem; leaving the variable unbound produces a clearer
     // downstream error than substituting a wrong value would.
     if (outcome.ok) variables[binding.name] = outcome.value;
@@ -361,6 +397,7 @@ export function renderMessage(
   parts: readonly SchMessagePart[],
   namespaces: Readonly<Record<string, string>>,
   variables: Record<string, unknown> = {},
+  documents?: ReadonlyMap<string, XmlDocument>,
 ): string {
   let out = '';
 
@@ -371,7 +408,11 @@ export function renderMessage(
         out += part.text;
         break;
       case 'value-of': {
-        const outcome = evaluateString(document, context, part.select, { namespaces, variables });
+        const outcome = evaluateString(document, context, part.select, {
+          namespaces,
+          variables,
+          documents,
+        });
         out += outcome.ok ? outcome.value : `[${part.select}?]`;
         break;
       }
@@ -380,8 +421,17 @@ export function renderMessage(
           const node = document.node(context);
           out += node !== undefined && isElement(node) ? qnameToString(node.name) : '';
         } else {
-          const outcome = evaluateNodes(document, context, part.path, { namespaces, variables });
-          const first = outcome.ok ? outcome.value[0] : undefined;
+          const outcome = evaluateNodes(document, context, part.path, {
+            namespaces,
+            variables,
+            documents,
+          });
+          // A ref naming another document must not be looked up in this one — same id, different
+          // node — so a name path landing in doc() output renders as nothing rather than as the
+          // instance node that happens to share the id.
+          const first = outcome.ok
+            ? outcome.value.find((ref) => ref.documentName === undefined)
+            : undefined;
           const node = first === undefined ? undefined : document.node(first.node);
           out += node !== undefined && isElement(node) ? qnameToString(node.name) : '';
         }

