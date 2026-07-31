@@ -170,7 +170,7 @@
     "semantic_hash": "f553d0a0d3b769bacf0ef7426d1d24d0"
   },
   "apps/editor/src/model/table.ts": {
-    "mtime": 1785330581.782962,
+    "mtime": 1785493296.1125052,
     "ast_hash": "abc54d7a231d74fe639f52213eb0412d",
     "semantic_hash": "abc54d7a231d74fe639f52213eb0412d"
   },
@@ -680,8 +680,8 @@
     "semantic_hash": ""
   },
   ".claude/graphify-setup.sh": {
-    "mtime": 1785492775.7949457,
-    "ast_hash": "2f6694eec0cbe0d8cdef21ad4c816252",
+    "mtime": 1785493252.5029347,
+    "ast_hash": "431770e1e350d3e3a4f0470884593599",
     "semantic_hash": ""
   },
   ".claude/settings.json": {
@@ -697,6 +697,11 @@
   "CLAUDE.md": {
     "mtime": 1785492850.946944,
     "ast_hash": "46026492396070a673e256651fc90be9",
+    "semantic_hash": ""
+  },
+  ".claude/graphify-precommit.sh": {
+    "mtime": 1785493239.354935,
+    "ast_hash": "a6ea274e841417e2615f8009b31a49f7",
     "semantic_hash": ""
   }
 }

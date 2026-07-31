@@ -34,9 +34,22 @@ fi
 
 command -v graphify >/dev/null 2>&1 || exit 0
 
-# Re-register the post-commit rebuild, the post-checkout refresh, and the union merge driver for
-# graph.json. The driver matters more now than it looks: a tracked graph.json is rewritten by the
-# post-commit hook on every commit, so two branches that both commit will always conflict on it.
+# Registers the post-checkout refresh and the union merge driver for graph.json. The driver matters
+# more than it looks: a tracked graph.json is rewritten on every commit, so two branches that both
+# commit will always conflict on it without one.
 graphify hook install >/dev/null 2>&1 || true
+
+# Swap graphify's post-commit rebuild for a pre-commit one. Its version runs after the commit is
+# written and detached into the background, which cannot work when graph.json is tracked — the
+# rebuild lands in the working tree instead of the commit, leaving every commit followed by a dirty
+# graph. See .claude/graphify-precommit.sh.
+_HOOKS=$(git rev-parse --git-path hooks 2>/dev/null) || _HOOKS=""
+if [ -n "$_HOOKS" ] && [ -d "$_HOOKS" ]; then
+    rm -f "$_HOOKS/post-commit"
+    if [ -f .claude/graphify-precommit.sh ]; then
+        cp .claude/graphify-precommit.sh "$_HOOKS/pre-commit" 2>/dev/null || true
+        chmod +x "$_HOOKS/pre-commit" 2>/dev/null || true
+    fi
+fi
 
 exit 0
