@@ -14,8 +14,10 @@ with the live test harness) are in place, with ~600 tests. Every verdict is chec
 independent implementation: `libxml2-wasm` for XSD 1.0, `xmlschema` for 1.1, and the ISO Schematron
 reference for Schematron. All five spikes are answered — see [`docs/spikes.md`](docs/spikes.md).
 **Phase 8 is ongoing**; its two risk-carrying items (mixed content, the table view) are done, and
-what remains there is listed honestly in §10. See §10 for the roadmap and the per-phase *done when*,
-and §6.1 for the workspace.
+what remains there is listed honestly in §10. **Phase 9 — the workspace becoming a corpus of many
+documents rather than one file per kind — is planned but not started; see §6.2**, which also records
+why the one-slot design in §6.1 is the wrong shape for what the tool is for. See §10 for the roadmap
+and the per-phase *done when*.
 
 **Companion documents**
 
@@ -413,6 +415,119 @@ belongs to the **XSD** even though it is invariably noticed in the XML.
 The tab chips carry live per-file counts for the same reason: a red **2** on the XSD chip while you
 are working in the XML is the whole point of holding them together, and a count you have to click to
 find is a count nobody sees.
+
+---
+
+### 6.2 Phase 9 — the workspace becomes a corpus
+
+§6.1 holds **one file per kind**. That is the wrong shape for what the tool is actually for, and this
+section records why, what replaces it, and what it costs.
+
+#### The thesis, restated
+
+The tool has been built as though the XML is the work and the schema constrains it. For the user who
+matters, it is the other way round: **the XSD and the Schematron are the artefact under development,
+and the XML files are the evidence about them.** Someone writing a schema keeps a document they know
+should pass and a document they know should fail, and the question they ask all day is *what did that
+edit just do to both of them?*
+
+One slot per kind cannot answer it. Opening a second XML evicts the first, so the single most useful
+arrangement — a known-good and a known-bad document side by side, both reacting live to a change in
+the rules — is the one arrangement the design forbids. Everything below follows from removing that
+restriction.
+
+#### Slots become collections
+
+Any number of files per kind. The `xml` slot becomes a list; so do `xsd` and `sch`.
+
+All open XSDs assemble into **one schema set**. The engine already does this — `assembleSchema` takes
+a catalogue and resolves `include`/`import` across documents — so whether two schemas reference each
+other or merely sit side by side is a property of what the author wrote, not a mode the editor needs.
+Two unrelated schemas in one set is a normal schema set with two roots.
+
+Every XML file is checked against that set and against every open rule set. The cross product is the
+product: *N* documents × the current schema × the current rules, all live.
+
+#### What Schematron can and cannot do across files
+
+Three claims, separated because they are usually conflated and only two are true.
+
+**Rules over a schema: already works.** An XSD is XML, so Schematron can be pointed at `order.xsd`
+and enforce schema-design conventions — naming rules, "every global type carries documentation", "no
+anonymous complex types where a named one would do". The interpreter neither knows nor cares that its
+target is a schema. Nothing needs building; the one-slot design is the only thing preventing it, and
+Phase 9 removes that by construction.
+
+**Rules across documents: does not work, deliberately.** Comparing a value in `invoice.xml` against a
+code list in `codes.xml` requires XPath's `document()`, and `xpath.ts` supplies no document resolver
+precisely so that it is unavailable. That is a security decision, recorded in §8: a `.sch` someone
+emailed you is executable code, and a resolver is the difference between rules that inspect the
+document and rules that read the disk.
+
+It can be enabled without giving that up, by scoping the resolver to **files already open in the
+workspace**. A rule may then reach `codes.xml` if the user opened `codes.xml`, and nothing else —
+same shape as the schema catalogue, which resolves `include` against opened documents rather than
+fetching. This is the one genuinely new capability in Phase 9 and should not be bundled with the rest:
+it is a change to the threat model and deserves its own decision.
+
+**Schematron validating "between two XSDs": not a thing.** Schematron runs on an instance and never
+sees the compiled schema. The useful reading of that request is the first claim above.
+
+#### Status belongs in every list of files
+
+Wherever files are listed, each one carries its verdict and its failure count. `invoice-bad.xml ✗3`
+beside `invoice-good.xml ✓`, and an edit to the rules moves both, live.
+
+**No expected-verdict manifest.** An earlier draft proposed marking files "should fail" so the editor
+could flag a fixture that passes when it ought not to. Rejected: it invents a second source of truth
+about intent, needs somewhere to live, goes stale, and buys little over the author simply looking at
+two numbers and knowing which one should be red. Counts are honest and need no bookkeeping.
+
+`workspaceProblems()` already attributes every finding to a file; it grows a file identity rather
+than a file *kind*, and `countsByFile` becomes counts per document. The attribution rules in §6.1 do
+not change — a failing assert still belongs to the XML that failed it.
+
+#### The part that is actually hard
+
+Validation does not scale to a corpus by being given more files.
+
+libxml2 runs **one document in one worker**, and the 500 ms schema debounce was sized on the
+assumption that a schema edit invalidates one verdict. With ten documents open it invalidates ten,
+and a naive loop makes every schema keystroke ten worker round-trips. This is the risk item of Phase
+9 and the reason the phase is staged rather than delivered whole.
+
+The shape of the answer:
+
+- **A per-document dirty flag.** A schema edit dirties every document; a document edit dirties only
+  itself. Most keystrokes are the second kind.
+- **A queue with a visible tail, not a fan-out.** Documents revalidate one at a time against the
+  already-compiled schema, so the cost of a schema change is one recompile plus *N* validations
+  rather than *N* recompiles.
+- **Foreground first.** The document being looked at revalidates first; the rest follow. A verdict
+  the user is waiting for should not queue behind nine they are not.
+- **Stale rather than cleared**, exactly as §5 already requires per document. A file whose verdict is
+  in flight dims; it does not flicker through "no problems".
+
+The guidance engine has no equivalent problem — it is in-process, lazy and memoised, and *N*
+documents against one compiled model is *N* cheap queries.
+
+#### Staging
+
+Deliberately not one change.
+
+1. **Many XML, one XSD, one SCH.** Delivers the case that motivated this — known-good and known-bad
+   side by side — and forces the validation-scaling problem immediately, which is where it should be
+   met rather than after further generalisation.
+2. **Many XSD.** One assembled set from all of them. Mostly a matter of handing `assembleSchema` a
+   larger catalogue.
+3. **Many SCH.** Every rule set runs against every instance; findings carry which rule set raised
+   them.
+4. **`document()`, scoped to the workspace.** Separate, because it is a threat-model change.
+
+*Done when:* two XML documents can be open with one schema and one rule set; each shows a live
+failure count in the file list; editing the schema or the rules moves both counts without either
+document being reopened; and a corpus of ten documents does not make a schema keystroke feel slower
+than the corpus of one does today.
 
 ## 7. The three document kinds
 
